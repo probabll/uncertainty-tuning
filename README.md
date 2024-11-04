@@ -9,6 +9,9 @@ pip install -e .
 ```
 
 ### Generating evaluation data (WIP)
-After installing you can generate evaluation data (greedy decoding and 20 samples)
+After installing you can generate evaluation data as:
 
-```unctune-gen-eval-data --model olmo --data popqa```
+```
+# Generates 20 samples and 1 greedy decoding on PopQA, using Olmo and the uncertainty prompt.
+unctune-gen-eval-data --model olmo --data popqa --prompt uncertainty
+```
