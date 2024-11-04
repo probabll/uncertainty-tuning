@@ -5,16 +5,20 @@ class BasePrompt:
 
 class VanillaPrompt(BasePrompt):
     
-    instruction = "Answer the following question using a succinct (at most one sentence) and full answer."
+    BREVITY_PROMPT = "Answer the following question using a succinct (at most one sentence) and full answer."
 
     def __call__(self, question):
         base_prompt = super().__call__(question)
-        return f"{self.instruction} {base_prompt}"
+        return f"{self.BREVITY_PROMPT} {base_prompt}"
     
-class UncertaintyPrompt(BasePrompt):
+class UncertaintyPrompt(VanillaPrompt):
 
-    instruction = "If you are uncertain about your answer to the question, convey this uncertainty linguistically by precisely hedging this answer."
+    UNCERTAINTY_PROMPT = "If you are uncertain about your answer to the question, convey this uncertainty linguistically by precisely hedging this answer."
 
-    def __call__(self, question):
-        base_prompt = super().__call__(question)
-        return f"{self.instruction} {base_prompt}"
+    def __call__(self, question: str) -> str:
+        base_prompt = BasePrompt.__call__(self, question) 
+        return f"{self.BREVITY_PROMPT} {self.UNCERTAINTY_PROMPT} {base_prompt}"
+    
+if __name__ == "__main__":
+    prompt = UncertaintyPrompt()
+    print(prompt("What is the capital of France?"))
