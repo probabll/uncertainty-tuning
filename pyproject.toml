@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["unctune"]
+
+[project]
+name = "uncertainty-tuning"
+description = "Learning to express faithful markers of uncertainty for natural language generation models."
+version = "0.1.0"
+authors = [
+    { name = "Bryan Eikema", email = "b.eikema@uva.nl" },
+    { name = "Evgenia Ilia", email = "e.ilia@uva.nl" }
+]
+requires-python = ">=3.7"
+
+dependencies = [
+
+]
+
+[project.scripts]
+unctune-gen-eval-data = "unctune.scripts.gen_eval_data:main"
