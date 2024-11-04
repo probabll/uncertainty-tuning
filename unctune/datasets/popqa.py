@@ -1,8 +1,4 @@
-import argparse
-import datasets
-import json
-# from tqdm import tqdm
-from .base_dataset import BaseDataset
+from unctune.datasets.base_dataset import BaseDataset
 import os
 import urllib.request
 import pandas as pd
@@ -63,3 +59,5 @@ class PopQA(BaseDataset):
 
 if __name__ == "__main__": 
     popqa = PopQA()
+    print(len(popqa.data))
+    print(popqa.data)
