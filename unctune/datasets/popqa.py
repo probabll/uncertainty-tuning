@@ -1,6 +1,7 @@
 from unctune.datasets.base_dataset import BaseDataset
 import os
 import urllib.request
+import ast
 import pandas as pd
 
 class PopQA(BaseDataset):
@@ -51,13 +52,21 @@ class PopQA(BaseDataset):
 
         # Rename the answer column and only retain a subset
         data.loc[:, "answers"] = data["possible_answers"]
+        data["answers"] = data["answers"].apply(ast.literal_eval)
         data = data[["prop", "s_pop", "o_pop", "question", "answers"]]
 
         # Only keep a subset of 932 rows
         data = data.sample(932, random_state=0)
         return data
+    
+    def __getitem__(self, idx):
+        """ Returns the questions and answers as a tuple at the given index or slice. """
+        if isinstance(idx, slice):
+            return self.data.iloc[idx]["question"].values, self.data.iloc[idx]["answers"].values
+        else:
+            return self.data.iloc[idx]["question"], self.data.iloc[idx]["answers"]
 
 if __name__ == "__main__": 
     popqa = PopQA()
-    print(len(popqa.data))
-    print(popqa.data)
+    print(len(popqa))
+    print(popqa[0])

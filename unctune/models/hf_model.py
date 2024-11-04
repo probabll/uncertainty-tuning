@@ -31,12 +31,14 @@ class HuggingFaceModel(BaseModel):
         if not do_sample:
             nsamples = 1
 
+        self.model = self.model.to(cfg.device)
+
         inputs = self.tokenizer.batch_encode_plus(prompts, 
                                                   add_special_tokens=False, 
                                                   return_tensors="pt",
                                                   padding=True)
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
+        input_ids = inputs["input_ids"].to(cfg.device)
+        attention_mask = inputs["attention_mask"].to(cfg.device)
         outputs = self.model.generate(input_ids=input_ids, attention_mask=attention_mask,
                                       max_new_tokens=cfg.max_length, 
                                       num_return_sequences=nsamples, do_sample=do_sample,
