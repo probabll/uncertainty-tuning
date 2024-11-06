@@ -1,8 +1,6 @@
 from typing import List, Tuple, Optional
 from unctune.models import BaseModel, Olmo, GenerationConfig
 
-import re
-
 class NliLLM:
 
     PROMPT = """I will give you a question and two candidate answers. Please determine whether the two answers are contradicting. If one of the Candidate Answers is a canned response (as in, avoids answering the question), then the verdict should be "no contradiction".
