@@ -1,5 +1,5 @@
 from typing import List, Tuple, Optional
-from unctune.models import BaseModel, Olmo, GenerationConfig
+from unctune.models import BaseModel, GenerationConfig, OpenAIModel
 
 class NliLLM:
 
@@ -48,9 +48,10 @@ Verdict: contradiction"""
         """
         self.model = model
         self.gen_cfg = gen_cfg
-        self.gen_cfg.remove_prompt = True
+        if self.gen_cfg is not None:
+            self.gen_cfg.remove_prompt = True
 
-    def entails(self, question: str, answer_1: str, answer_2: str) -> List[Tuple[str, float]]:
+    def does_not_contradict(self, question: str, answer_1: str, answer_2: str) -> List[Tuple[str, float]]:
         prompt = self._construct_prompt(question, answer_1, answer_2)
         llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
         return self._extract_nli(llm_output)
@@ -62,14 +63,16 @@ Verdict: contradiction"""
         return f"{self.PROMPT}\n\nQuestion: {question}\nCandidate Answer 1: {answer_1}\nCandidate Answer 2: {answer_2}\nVerdict: "
 
 if __name__ == "__main__":
-    gen_cfg = GenerationConfig(remove_prompt=True, device="cuda:0")
-    model = Olmo()
+    gen_cfg = None
+    model = OpenAIModel("gpt-4o-mini")
     nli = NliLLM(model, gen_cfg)
+    
     question = "What is the capital of France?"
     answer_1 = "The capital of France is Paris."
     answer_2 = "It is Paris."
     print((question, answer_1, answer_2))
-    print(nli.entails(question, answer_1, answer_2))
+    print(nli.does_not_contradict(question, answer_1, answer_2))
+
     answer_3 = "It is Copenhagen."
     print((question, answer_1, answer_3))
-    print(nli.entails(question, answer_1, answer_3))
+    print(nli.does_not_contradict(question, answer_1, answer_3))

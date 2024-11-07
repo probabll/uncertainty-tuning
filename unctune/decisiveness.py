@@ -1,5 +1,5 @@
 from typing import List, Tuple, Optional
-from unctune.models import BaseModel, Olmo, GenerationConfig
+from unctune.models import BaseModel, GenerationConfig, OpenAIModel
 
 import re
 
@@ -56,12 +56,11 @@ Decisiveness score: 1.0."""
         return f"{self.PROMPT}\n\nQuestion: {question}\nProposed answer: {response}\n"
 
 if __name__ == "__main__":
-    gen_cfg = GenerationConfig(remove_prompt=True, device="cuda:0")
-    model = Olmo()
-    extractor = DecisivenessExtractorLLM(model, gen_cfg)
+    model = OpenAIModel("gpt-4o-mini")
+    extractor = DecisivenessExtractorLLM(model)
 
     question = "What is the capital of France?"
-    proposed_response = "The capital of France is either Paris or Copenhagen."
+    proposed_response = "The capital of France is either Paris or Copenhagen. I am certain that I love French food."
     print(extractor(question, proposed_response))
 
     question = "Who is president of the United States?"
