@@ -26,11 +26,11 @@ class NQ(BaseDataset):
         return data
 
     def __getitem__(self, idx):
-        """ Returns the questions and answers as a tuple at the given index or slice. """
+        """ Returns the idx, questions and answers as a tuple at the given index or slice. """
         if isinstance(idx, slice):
-            return self.data.iloc[idx]["question"].values, self.data.iloc[idx]["answer"].values
+            return self.data.iloc[idx]["id"].values, self.data.iloc[idx]["question"].values, self.data.iloc[idx]["answer"].values
         else:
-            return self.data.iloc[idx]["question"], self.data.iloc[idx]["answer"]
+            return self.data.iloc[idx]["id"], self.data.iloc[idx]["question"], self.data.iloc[idx]["answer"]
 
 if __name__ == "__main__":
     nq = NQ()

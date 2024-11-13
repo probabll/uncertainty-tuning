@@ -62,9 +62,9 @@ class PopQA(BaseDataset):
     def __getitem__(self, idx):
         """ Returns the questions and answers as a tuple at the given index or slice. """
         if isinstance(idx, slice):
-            return self.data.iloc[idx]["question"].values, self.data.iloc[idx]["answers"].values
+            return self.data.iloc[idx].index.values, self.data.iloc[idx]["question"].values, self.data.iloc[idx]["answers"].values
         else:
-            return self.data.iloc[idx]["question"], self.data.iloc[idx]["answers"]
+            return int(self.data.iloc[idx].name), self.data.iloc[idx]["question"], self.data.iloc[idx]["answers"]
 
 if __name__ == "__main__": 
     popqa = PopQA()

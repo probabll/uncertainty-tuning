@@ -34,19 +34,18 @@ Decisiveness score: 1.0."""
     def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
         self.model = model
         self.gen_cfg = gen_cfg
-        self.gen_cfg.remove_prompt = True
+        if self.gen_cfg is not None:
+            self.gen_cfg.remove_prompt = True
 
-    def __call__(self, question: str, response: str) -> List[Tuple[str, float]]:
+    def __call__(self, question: str, response: str, return_raw=False) -> List[Tuple[str, float]]:
         prompt = self._construct_prompt(question, response)
         llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
-        return self._extract_decisiveness(llm_output)
+        decisiveness = self._extract_decisiveness(llm_output)
+        return (decisiveness, llm_output) if return_raw else decisiveness
     
     def _extract_decisiveness(self, llm_output: str) -> List[Tuple[str, float]]:
         try:
-            assertions_and_scores = re.findall(r"(?:Extracted assertion: (.*?)\.\n)?Decisiveness score: ([0-9]+\.[0-9]+)", llm_output)  
-
-            # Technically more correct, but Olmo is stubborn sometimes
-            # assertions_and_scores = re.findall(r"Extracted assertion:(?: (.*?)\.\n)?Decisiveness score: ([0-9]+\.[0-9]+)", llm_output) 
+            assertions_and_scores = re.findall(r"(?:Extracted assertion:(.*?)\n)?Decisiveness score: ([0-9]+\.[0-9]+)", llm_output)  
             assertions_and_scores = [(assertion.strip(), float(score)) for assertion, score in assertions_and_scores]
             return assertions_and_scores
         except:
@@ -65,4 +64,8 @@ if __name__ == "__main__":
 
     question = "Who is president of the United States?"
     proposed_response = "I don't know."
+    print(extractor(question, proposed_response))
+
+    question = 'Who was the screenwriter for The Russia House?'
+    proposed_response = 'The screenplay for The Russia House was written by Stephen Schiff, based on the novel by John Le Carré.'
     print(extractor(question, proposed_response))

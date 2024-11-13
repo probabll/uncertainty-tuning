@@ -24,13 +24,6 @@ class Olmo(HuggingFaceModel):
         return super().sample(prompts, n, cfg)
 
 if __name__ == "__main__":
-
-    # Fix the seed
-    import random
-    import torch
-    random.seed(42)
-    torch.manual_seed(42)
-
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]
     model = Olmo()
     cfg = GenerationConfig(remove_prompt=True)
