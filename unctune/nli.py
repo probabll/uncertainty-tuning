@@ -51,11 +51,12 @@ Verdict: contradiction"""
         if self.gen_cfg is not None:
             self.gen_cfg.remove_prompt = True
 
-    def does_not_contradict(self, question: str, answer_1: str, answer_2: str) -> List[Tuple[str, float]]:
+    def does_not_contradict(self, question: str, answer_1: str, answer_2: str, return_raw=False) -> List[Tuple[str, float]]:
         prompt = self._construct_prompt(question, answer_1, answer_2)
         llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
-        return self._extract_nli(llm_output)
-    
+        nli_output = self._extract_nli(llm_output)
+        return (nli_output, llm_output) if return_raw else nli_output
+
     def _extract_nli(self, llm_output: str) -> List[Tuple[str, float]]:
         return "no contradiction" in llm_output
     
