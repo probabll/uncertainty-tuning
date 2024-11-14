@@ -229,7 +229,7 @@ def main():
         faithfulnesses.append(faithfulness)
 
     # Count the number of samples in each bin
-    bin_counts = [confidence_bins.count(i) for i in range(11)]
+    bin_counts = [bin_ids.count(i) for i in range(11)]
     print("Bin counts:")
     for i, count in enumerate(bin_counts):
         print(f"{i}: {count}")
@@ -238,7 +238,7 @@ def main():
     # MFG per bin
     MFG_per_bin = [0.0 for _ in range(11)]
     for i in range(11):
-        bin_faithfulnesses = [faithfulnesses[j] for j in range(len(faithfulnesses)) if confidence_bins[j] == i]
+        bin_faithfulnesses = [faithfulnesses[j] for j in range(len(faithfulnesses)) if bin_ids[j] == i]
         MFG_per_bin[i] = sum(bin_faithfulnesses)/len(bin_faithfulnesses)
     print("Mean faithfulness per bin:")
     for i, mean_faithfulness in enumerate(MFG_per_bin):
