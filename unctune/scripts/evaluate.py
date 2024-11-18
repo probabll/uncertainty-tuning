@@ -208,7 +208,7 @@ def main():
     faithfulnesses = []
     bin_ids = []
 
-    confidence_bins = [i/10 for i in range(11)]
+    confidence_bins = [i/10 for i in range(1, 11)]
     
     for row in confidence_data:
         confidence = row["confidence"]
@@ -228,21 +228,40 @@ def main():
         decisivenesses.append(decisiveness)
         faithfulnesses.append(faithfulness)
 
+
     # Count the number of samples in each bin
-    bin_counts = [bin_ids.count(i) for i in range(11)]
+    bin_counts = [bin_ids.count(i) for i in range(len(confidence_bins))]
+
+    bin_idx_to_name = {i: f"({confidence_bins[i]-(1. / len(confidence_bins)):.1f}, {confidence_bins[i]:.1f}]" for i in range(1, len(confidence_bins))}
+    bin_idx_to_name[0] = f"[0.0, {confidence_bins[0]:.1f}]"
     print("Bin counts:")
     for i, count in enumerate(bin_counts):
-        print(f"{i}: {count}")
+        print(f"{bin_idx_to_name[i]}: {count}")
     print()
 
     # MFG per bin
-    MFG_per_bin = [0.0 for _ in range(11)]
-    for i in range(11):
+    MFG_per_bin = [0.0 for _ in range(len(confidence_bins))]
+    for i in range(len(confidence_bins)):
         bin_faithfulnesses = [faithfulnesses[j] for j in range(len(faithfulnesses)) if bin_ids[j] == i]
         MFG_per_bin[i] = sum(bin_faithfulnesses)/len(bin_faithfulnesses)
+
     print("Mean faithfulness per bin:")
     for i, mean_faithfulness in enumerate(MFG_per_bin):
-        print(f"{i}: {mean_faithfulness:.2f}")
+        print(f"{bin_idx_to_name[i]}: {mean_faithfulness:.2f}")
+    print()
+
+    print("Mean confidence per bin:")
+    for i in range(len(confidence_bins)):
+        bin_confidences = [confidences[j] for j in range(len(confidences)) if bin_ids[j] == i]
+        mean_confidence = sum(bin_confidences)/len(bin_confidences)
+        print(f"{bin_idx_to_name[i]}: {mean_confidence:.2f}")
+    print()
+
+    print("Mean decisiveness per bin:")
+    for i in range(len(confidence_bins)):
+        bin_decisivenesses = [decisivenesses[j] for j in range(len(decisivenesses)) if bin_ids[j] == i]
+        mean_decisiveness = sum(bin_decisivenesses)/len(bin_decisivenesses)
+        print(f"{bin_idx_to_name[i]}: {mean_decisiveness:.2f}")
     print()
 
     # Assumes uniform distribution of confidence scores
