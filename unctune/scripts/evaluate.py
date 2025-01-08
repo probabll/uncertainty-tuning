@@ -1,4 +1,4 @@
-from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel
+from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral
 from unctune.datasets import PopQA, NQ
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt
 from unctune.decisiveness import DecisivenessExtractorLLM
@@ -17,9 +17,11 @@ def main():
     parser.add_argument("--dataset", type=str, default="popqa")
     parser.add_argument("--model", type=str, default="olmo")
     parser.add_argument("--prompt", type=str, default="vanilla")
-    parser.add_argument("--judge_model", type=str, default="gpt-4o-mini")
+    parser.add_argument("--nli_model", type=str, default="gpt-4o-mini")
+    parser.add_argument("--decisiveness_model", default="gpt-4o-mini")
     parser.add_argument("--sample_batch_size", type=int, default=10)
     parser.add_argument("--override_files", action="store_true")
+    parser.add_argument("--skip_sample_assertions", action="store_true")
     args = parser.parse_args()
 
     dataset = load_dataset(args.dataset)
@@ -67,17 +69,17 @@ def main():
         print(f"Data saved to {generations_file}.")
     
     ### Extract the decisiveness scores
-    decisiveness_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-{args.judge_model}.decisiveness.json"
+    decisiveness_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.decisiveness-{args.decisiveness_model}.json"
     if not decisiveness_file.exists() or args.override_files:
         dataframe = pd.read_parquet(generations_file, engine="pyarrow")
 
-        judge_model = load_model(args.judge_model)
+        judge_model = load_model(args.decisiveness_model)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
         
         extractor = DecisivenessExtractorLLM(judge_model, gen_cfg)
 
-        print("Extracting assertions and decisiveness scores...")
+        print(f"Extracting assertions and decisiveness scores using {args.decisiveness_model}...")
         decisiveness_data = []
         for x, row in tqdm(dataframe.iterrows(), total=len(dataframe)):
             question = row["question"]
@@ -99,23 +101,26 @@ def main():
             }
 
             # Then do the sampled responses, we technically only need the assertions here.
-            sampled_responses = row["samples"]
-            sampled_data = []
-            for i, sampled_response in enumerate(sampled_responses):
-                
-                if sampled_response in cache:
-                    decisiveness, raw_output = cache[sampled_response]
-                    raw_output = "<cache>"
-                else:
-                    decisiveness, raw_output = extractor(question, sampled_response, return_raw=True)
-                    cache[sampled_response] = (decisiveness, raw_output)
+            if not args.skip_sample_assertions:
+                sampled_responses = row["samples"]
+                sampled_data = []
+                for i, sampled_response in enumerate(sampled_responses):
+                    
+                    if sampled_response in cache:
+                        decisiveness, raw_output = cache[sampled_response]
+                        raw_output = "<cache>"
+                    else:
+                        decisiveness, raw_output = extractor(question, sampled_response, return_raw=True)
+                        cache[sampled_response] = (decisiveness, raw_output)
 
-                sampled_data.append({
-                    "sample_idx": i,
-                    "llm_judge_output": raw_output,
-                    "decisiveness": decisiveness # list of (assertion, deciviseness) tuples
-                })
-            row_data["samples"] = sampled_data
+                    sampled_data.append({
+                        "sample_idx": i,
+                        "llm_judge_output": raw_output,
+                        "decisiveness": decisiveness # list of (assertion, deciviseness) tuples
+                    })
+                row_data["samples"] = sampled_data
+            else:
+                row_data["samples"] = []
             
             decisiveness_data.append(row_data)
 
@@ -125,7 +130,7 @@ def main():
             "dataset": args.dataset,
             "model": args.model,
             "prompt": args.prompt,
-            "judge_model": args.judge_model
+            "judge_model": args.decisiveness_model
         }
         data["data"] = decisiveness_data
         with open(decisiveness_file, "w") as f:
@@ -133,18 +138,19 @@ def main():
         print(f"Decisiveness / assertions data saved to {decisiveness_file}.")
 
     ### Compute confidence scores
-    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-{args.judge_model}.confidence.json"
+    skip_assertions = "-skip-sample-assertions" if args.skip_sample_assertions else ""
+    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}{skip_assertions}.json"
     if not confidence_file.exists() or args.override_files:
         generations = pd.read_parquet(generations_file, engine="pyarrow")
         assertions_by_idx = read_assertions(decisiveness_file)
         
-        judge_model = load_model(args.judge_model)
+        judge_model = load_model(args.nli_model)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
 
         nli = NliLLM(judge_model, gen_cfg)
 
-        print("Computing confidence scores...")
+        print(f"Computing confidence scores using {args.nli_model}...")
         confidence_data = []
         for x, row in tqdm(generations.iterrows(), total=len(generations)):
             question = row["question"]
@@ -154,9 +160,12 @@ def main():
                 "idx": idx
             }
 
-            # Then do the sampled responses
             greedy_assertion = assertions_by_idx[idx]["assertion"]
-            sampled_assertions = assertions_by_idx[idx]["sampled_assertions"]
+
+            if args.skip_sample_assertions:
+                sampled_assertions = row["samples"]
+            else:
+                sampled_assertions = assertions_by_idx[idx]["sampled_assertions"]
             contradictions = []
             llm_outputs = []
             cache = {}
@@ -181,7 +190,7 @@ def main():
             confidence = 1.0 - (1.0/len(sampled_assertions)) * sum(contradictions)
 
             row_data["confidence"] = confidence
-            row_data["contradicitions"] = contradictions
+            row_data["contradictions"] = contradictions
             row_data["llm_outputs"] = llm_outputs
             confidence_data.append(row_data)
 
@@ -191,7 +200,7 @@ def main():
             "dataset": args.dataset,
             "model": args.model,
             "prompt": args.prompt,
-            "judge_model": args.judge_model
+            "judge_model": args.nli_model
         }
         data["data"] = confidence_data
         with open(confidence_file, "w") as f:
@@ -306,6 +315,8 @@ def load_model(name):
     name = name.lower()
     if name == "olmo":
         return Olmo()
+    if name == "mistral":
+        return Mistral()
     elif name.startswith("gpt-"):
         return OpenAIModel(model_name=name)
     else:
