@@ -7,7 +7,7 @@ class Gemini(BaseModel):
 
     def __init__(self, model_name):
         super().__init__()
-        self.model = genai.GenerativeModel(model_name)
+        self.model = genai.GenerativeModel("models/" + model_name)
 
     def greedy_decode(self, prompts, cfg=None):
         return self._generate(prompts, do_sample=False, nsamples=1, cfg=cfg)
