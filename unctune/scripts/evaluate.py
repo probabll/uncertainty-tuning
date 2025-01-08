@@ -1,4 +1,4 @@
-from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral
+from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral, Gemini
 from unctune.datasets import PopQA, NQ
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt
 from unctune.decisiveness import DecisivenessExtractorLLM
@@ -15,7 +15,7 @@ import pandas as pd
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="popqa")
-    parser.add_argument("--model", type=str, default="olmo")
+    parser.add_argument("--model", type=str, default="olmo") 
     parser.add_argument("--prompt", type=str, default="vanilla")
     parser.add_argument("--nli_model", type=str, default="gpt-4o-mini")
     parser.add_argument("--decisiveness_model", default="gpt-4o-mini")
@@ -319,6 +319,8 @@ def load_model(name):
         return Mistral()
     elif name.startswith("gpt-"):
         return OpenAIModel(model_name=name)
+    elif name.startswith("gemini"):
+        return Gemini(model_name=name)
     else:
         return HuggingFaceModel(model_name=name)
 
