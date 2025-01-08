@@ -15,7 +15,7 @@ class Gemini(BaseModel):
     def sample(self, prompts, n, cfg=None):
         return self._generate(prompts, do_sample=True, nsamples=n, cfg=cfg)
 
-    def _generate(self, prompts, do_sample, nsamples=1, cfg=None, api ="AIzaSyBaD9Yzm3RmKvZ00oHEDwrbLwLdnNtnMTo"):
+    def _generate(self, prompts, do_sample, nsamples=1, cfg=None, api ="<INSERT_API_KEY>"):
         genai.configure(api_key=api)        
         safety_setting = {HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
                                                                                                 HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
