@@ -59,7 +59,7 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     
     prompts = ["What is Eleanor Davis's occupation?","What is George Rankin's occupation?"]
-    model = Gemini("models/gemini-1.0-pro-001")
+    model = Gemini("gemini-1.0-pro-001")
     
     cfg = genai.types.GenerationConfig(max_output_tokens=20)
     print(model.sample(prompts, n=2, cfg=cfg))
