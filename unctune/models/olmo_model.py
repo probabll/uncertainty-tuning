@@ -5,9 +5,10 @@ from hf_olmo import OLMoForCausalLM, OLMoTokenizerFast
 
 class Olmo(HuggingFaceModel):
 
-    def __init__(self, model_name="allenai/OLMo-7B-Instruct"):
+    def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct"): # "allenai/OLMo-7B-Instruct"
         super().__init__(model_name)
-        self.model = OLMoForCausalLM.from_pretrained(model_name)
+        # self.model = OLMoForCausalLM.from_pretrained(model_name) 
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype = torch.bfloat16) 
         self.tokenizer = OLMoTokenizerFast.from_pretrained(model_name, padding_side="left")
         self.assistant_prompt = "<|assistant|>\n"
 
