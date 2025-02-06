@@ -1,6 +1,6 @@
 from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral, Gemini
 from unctune.datasets import PopQATrain
-from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt
+from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt
 from unctune.nli import NliLLM
 from unctune.confidence_verbal import VerbalUncLLM
 
@@ -18,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="popqa_training")
     parser.add_argument("--model", type=str, default="olmo") 
-    parser.add_argument("--prompt", type=str, default="vanilla")
+    parser.add_argument("--prompt", type=str, default="generate_train")
     parser.add_argument("--nli_model", type=str, default="mistral") #check if we want to keep the gpt-4o as the NLI model since not free
     parser.add_argument("--unc_verbal_model", type=str, default="mistral") 
     parser.add_argument("--sample_batch_size", type=int, default=10)
@@ -204,6 +204,8 @@ def load_prompt(name):
         return VanillaPrompt()
     elif name == "uncertainty":
         return UncertaintyPrompt()
+    elif name == "generate_train":
+        return GenerateTrainingDataPrompt()
     else:
         raise ValueError(f"Unknown prompt: {name}")
 
