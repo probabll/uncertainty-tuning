@@ -1,7 +1,10 @@
+import torch
+
 from .hf_model import HuggingFaceModel
 from .gen_config import GenerationConfig
 
 from hf_olmo import OLMoForCausalLM, OLMoTokenizerFast
+from transformers import AutoModelForCausalLM
 
 class Olmo(HuggingFaceModel):
 
