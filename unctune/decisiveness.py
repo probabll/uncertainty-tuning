@@ -45,7 +45,7 @@ Decisiveness score: 1.0."""
     
     def _extract_decisiveness(self, llm_output: str) -> List[Tuple[str, float]]:
         try:
-            assertions_and_scores = re.findall(r"(?:Extracted assertion:(.*?)\n)?Decisiveness score: ([0-9]+\.[0-9]+)", llm_output)  
+            assertions_and_scores = re.findall(r"(?:Extracted assertion:(.*?)\n)?Decisiveness score: ([0-9]+\.?[0-9]*).?", llm_output)  
             assertions_and_scores = [(assertion.strip(), float(score)) for assertion, score in assertions_and_scores]
             return assertions_and_scores
         except:

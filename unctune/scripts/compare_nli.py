@@ -5,10 +5,10 @@ import numpy as np
 
 def main(args):
     ref_nli = json.load(open(args.reference, "r"))["data"]
-    ref_by_idx = {row["idx"]: [int(pred) for pred in row["contradictions"]] for row in ref_nli}
+    ref_by_idx = {row["idx"]: [int(pred) for sublist in row["contradictions"] for pred in sublist] for row in ref_nli}
 
     sys_nli = json.load(open(args.system, "r"))["data"]
-    sys_by_idx = {row["idx"]: [int(pred) for pred in row["contradictions"]] for row in sys_nli}
+    sys_by_idx = {row["idx"]: [int(pred) for sublist in row["contradictions"] for pred in sublist] for row in sys_nli}
 
     assert len(ref_by_idx) == len(sys_by_idx)
 

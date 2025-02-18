@@ -2,13 +2,19 @@ from .base_model import BaseModel
 from .gen_config import GenerationConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import torch
+
 class HuggingFaceModel(BaseModel):
 
-    def __init__(self, model_name):
+    def __init__(self, model_name, torch_dtype=torch.float16):
         super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.assistant_prompt = "<|im_start|>assistant\n" # used by _remove_prompt
+        self.torch_dtype = torch_dtype
+        self.model, self.tokenizer = self._create_model_and_tokenizer(model_name)
+
+    def _create_model_and_tokenizer(self, model_name):
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=self.torch_dtype)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        return model, tokenizer
 
     def greedy_decode(self, prompts, cfg=None):
         return self._generate(prompts, do_sample=False, nsamples=1, cfg=cfg)
@@ -18,9 +24,14 @@ class HuggingFaceModel(BaseModel):
         for generation in generations:
             last_assistant = generation.rfind(self.assistant_prompt)
             if last_assistant == -1:
-                return generation  
-            clean_generations.append(generation[last_assistant + len(self.assistant_prompt):])
-        return clean_generations
+                clean_generations.append(generation)  
+            generation = generation[last_assistant + len(self.assistant_prompt):]
+            first_eos = generation.find(self.tokenizer.eos_token)
+            if first_eos == -1:
+                clean_generations.append(generation) 
+            generation = generation[:first_eos]
+            clean_generations.append(generation[:first_eos])
+        return clean_generations            
 
     def sample(self, prompts, n, cfg=None):
         return self._generate(prompts, do_sample=True, nsamples=n, cfg=cfg)
@@ -34,10 +45,12 @@ class HuggingFaceModel(BaseModel):
         self.model = self.model.to(cfg.device)
 
         inputs = self.tokenizer.batch_encode_plus(prompts, 
-                                                  add_special_tokens=False, 
+                                                  add_special_tokens=True, 
                                                   return_tensors="pt",
                                                   padding=True)
         input_ids = inputs["input_ids"].to(cfg.device)
+        prompt_length = input_ids.shape[1]
+
         attention_mask = inputs["attention_mask"].to(cfg.device)
         outputs = self.model.generate(input_ids=input_ids, attention_mask=attention_mask,
                                       max_new_tokens=cfg.max_length, 
@@ -46,10 +59,7 @@ class HuggingFaceModel(BaseModel):
                                       top_p=1. if do_sample else None,
                                       temperature=1.,
                                       pad_token_id=self.tokenizer.pad_token_id)
-        
-        generations = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        if cfg.remove_prompt:
-            generations = self._remove_prompt(generations)
+        generations = self.tokenizer.batch_decode(outputs[:, prompt_length:], skip_special_tokens=True)
         return generations
     
 if __name__ == "__main__":

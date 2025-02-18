@@ -1,4 +1,4 @@
-from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral, Gemini
+from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral, Gemini, Olmo2, Qwen
 from unctune.datasets import PopQA, NQ
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt
 from unctune.decisiveness import DecisivenessExtractorLLM
@@ -14,14 +14,13 @@ import pandas as pd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="popqa")
-    parser.add_argument("--model", type=str, default="olmo") 
-    parser.add_argument("--prompt", type=str, default="vanilla")
-    parser.add_argument("--nli_model", type=str, default="gpt-4o-mini")
-    parser.add_argument("--decisiveness_model", default="gpt-4o-mini")
-    parser.add_argument("--sample_batch_size", type=int, default=10)
+    parser.add_argument("--dataset", "-d", type=str, default="popqa")
+    parser.add_argument("--model", "-m", type=str, default="olmo") 
+    parser.add_argument("--prompt", "-p", type=str, default="vanilla")
+    parser.add_argument("--decisiveness_model", "-dec", type=str)
+    parser.add_argument("--nli_model", "-nli", type=str, default=None)
+    parser.add_argument("--sample_batch_size", "-bs", type=int, default=10)
     parser.add_argument("--override_files", action="store_true")
-    parser.add_argument("--skip_sample_assertions", action="store_true")
     args = parser.parse_args()
 
     dataset = load_dataset(args.dataset)
@@ -30,10 +29,11 @@ def main():
     project_root = Path(__file__).resolve().parent.parent / ".."
     output_dir = project_root / "outputs" / "eval_data"
     output_dir.mkdir(exist_ok=True)
-    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.parquet"
+    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
     if not generations_file.exists() or args.override_files:
+        print("No generations found.")
 
         model = load_model(args.model)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -65,13 +65,16 @@ def main():
         dataframe.attrs["prompt"] = args.prompt
 
         # Store the data
-        dataframe.to_parquet(generations_file, engine="pyarrow", index=False)
+        dataframe.to_json(generations_file, orient="records", indent=4)      
         print(f"Data saved to {generations_file}.")
+    else:
+        print(f"Found generations data at {generations_file}.")
     
     ### Extract the decisiveness scores
     decisiveness_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.decisiveness-{args.decisiveness_model}.json"
     if not decisiveness_file.exists() or args.override_files:
-        dataframe = pd.read_parquet(generations_file, engine="pyarrow")
+        print("No decisiveness data found.")
+        dataframe = pd.read_json(generations_file)
 
         judge_model = load_model(args.decisiveness_model)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -87,7 +90,7 @@ def main():
                 "idx": row["idx"]
             }
 
-            # Do the greedy response first
+            # Extract assertions and decisiveness for the greedy response
             greedy_response = row["greedy"]
             decisiveness, raw_output = extractor(question, greedy_response, return_raw=True)
             row_data["greedy"] = {
@@ -95,33 +98,6 @@ def main():
                 "decisiveness": decisiveness
             }
 
-            # As many answers are the same in short-form QA, we can save some time and model calls by caching outputs.
-            cache = {
-                greedy_response: (decisiveness, raw_output)
-            }
-
-            # Then do the sampled responses, we technically only need the assertions here.
-            if not args.skip_sample_assertions:
-                sampled_responses = row["samples"]
-                sampled_data = []
-                for i, sampled_response in enumerate(sampled_responses):
-                    
-                    if sampled_response in cache:
-                        decisiveness, raw_output = cache[sampled_response]
-                        raw_output = "<cache>"
-                    else:
-                        decisiveness, raw_output = extractor(question, sampled_response, return_raw=True)
-                        cache[sampled_response] = (decisiveness, raw_output)
-
-                    sampled_data.append({
-                        "sample_idx": i,
-                        "llm_judge_output": raw_output,
-                        "decisiveness": decisiveness # list of (assertion, deciviseness) tuples
-                    })
-                row_data["samples"] = sampled_data
-            else:
-                row_data["samples"] = []
-            
             decisiveness_data.append(row_data)
 
         # Save to a JSON file
@@ -137,20 +113,32 @@ def main():
             json.dump(data, f, indent=2)
         print(f"Decisiveness / assertions data saved to {decisiveness_file}.")
 
+        # Unload the judge model to avoid OOM errors
+        del judge_model
+        del extractor
+        torch.cuda.empty_cache()
+    else:
+        print(f"Found decisiveness data at {decisiveness_file}.")
+
     ### Compute confidence scores
-    skip_assertions = "-skip-sample-assertions" if args.skip_sample_assertions else ""
-    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}{skip_assertions}.json"
+    nli_model_name = args.nli_model if args.nli_model is not None else args.decisiveness_model
+    if nli_model_name == args.decisiveness_model:
+        confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{nli_model_name}.json"
+    else:
+        confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-decisiveness-{args.decisiveness_model}-confidence-{nli_model_name}.json"
+
     if not confidence_file.exists() or args.override_files:
-        generations = pd.read_parquet(generations_file, engine="pyarrow")
+        print("No confidence data found.")
+        generations = pd.read_json(generations_file)
         assertions_by_idx = read_assertions(decisiveness_file)
         
-        judge_model = load_model(args.nli_model)
+        judge_model = load_model(nli_model_name)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
 
         nli = NliLLM(judge_model, gen_cfg)
 
-        print(f"Computing confidence scores using {args.nli_model}...")
+        print(f"Computing confidence scores using {nli_model_name}...")
         confidence_data = []
         for x, row in tqdm(generations.iterrows(), total=len(generations)):
             question = row["question"]
@@ -160,36 +148,46 @@ def main():
                 "idx": idx
             }
 
-            greedy_assertion = assertions_by_idx[idx]["assertion"]
-
-            if args.skip_sample_assertions:
-                sampled_assertions = row["samples"]
-            else:
-                sampled_assertions = assertions_by_idx[idx]["sampled_assertions"]
-            contradictions = []
-            llm_outputs = []
-            cache = {}
-            for sampled_assertion in sampled_assertions:
-
-                # If the greedy assertion is the same as the sampled assertion, we can skip the NLI call.
-                # Also, we keep a cache of the NLI outputs to avoid redundant calls.
-                if greedy_assertion == sampled_assertion:
-                    dnc = True
-                    llm_output = "<equivalent>"
-                elif sampled_assertion in cache:
-                    dnc, llm_output = cache[sampled_assertion]
-                    llm_output = "<cache>"
-                else:
-                    dnc, llm_output = nli.does_not_contradict(question, greedy_assertion, sampled_assertion, return_raw=True)
-                    cache[sampled_assertion] = (dnc, llm_output)
-
-                contradicts = 0.0 if dnc else 1.0
-                contradictions.append(contradicts)
-                llm_outputs.append(llm_output)
+            greedy_assertions = assertions_by_idx[idx]["assertions"]
+            decisiveness = assertions_by_idx[idx]["decisiveness"]
             
-            confidence = 1.0 - (1.0/len(sampled_assertions)) * sum(contradictions)
+            samples = row["samples"]
 
-            row_data["confidence"] = confidence
+            llm_outputs = []
+            contradictions = []
+            cache = {}
+
+            confidence_scores = []
+
+            # For each greedy assertion, we compute a confidence score
+            for greedy_assertion in greedy_assertions:
+
+                contradictions_i = []
+                llm_outputs_i = []
+                for sample_generation in samples:
+
+                    # If the greedy assertion is the same as the, we can skip the NLI call.
+                    # Also, we keep a cache of the NLI outputs to avoid redundant calls.
+                    if greedy_assertion == sample_generation:
+                        dnc = True
+                        llm_output = "<equivalent>"
+                    elif sample_generation in cache:
+                        dnc = cache[sample_generation]
+                        llm_output = "<cache>"
+                    else:
+                        dnc, llm_output = nli.does_not_contradict(question, greedy_assertion, sample_generation, return_raw=True)
+                        cache[sample_generation] = dnc
+
+                    contradicts = 0.0 if dnc else 1.0
+                    contradictions_i.append(contradicts)
+                    llm_outputs_i.append(llm_output)
+            
+                confidence_i = 1.0 - ((1.0/len(samples)) * sum(contradictions_i))
+                confidence_scores.append(confidence_i)
+                llm_outputs.append(llm_outputs_i)
+                contradictions.append(contradictions_i)
+            
+            row_data["confidence"] = confidence_scores
             row_data["contradictions"] = contradictions
             row_data["llm_outputs"] = llm_outputs
             confidence_data.append(row_data)
@@ -200,12 +198,14 @@ def main():
             "dataset": args.dataset,
             "model": args.model,
             "prompt": args.prompt,
-            "judge_model": args.nli_model
+            "judge_model": nli_model_name
         }
         data["data"] = confidence_data
         with open(confidence_file, "w") as f:
             json.dump(data, f, indent=2)
         print(f"Confidence / NLI data saved to {confidence_file}.")
+    else:
+        print(f"Found confidence data at {confidence_file}.")
 
     ### Compute faithfulness scores
     with open(confidence_file, "r") as f:
@@ -223,20 +223,20 @@ def main():
         confidence = row["confidence"]
         idx = row["idx"]
         decisiveness = assertions[idx]["decisiveness"]
-        faithfulness = 1.0 - abs(confidence - decisiveness)
-
-        # Assign a bin based on the confidence score
+        faithfulness = 1.0 - ((1.0 / len(confidence)) * sum([abs(c - d) for c, d in zip(confidence, decisiveness)]))
+        
+        # Assign a bin based on the average confidence score
+        average_confidence = sum(confidence) / len(confidence)
         bin_idx = 0
         for i, bin_val in enumerate(confidence_bins):
-            if confidence <= bin_val:
+            if average_confidence <= bin_val:
                 bin_idx = i
                 break
 
         bin_ids.append(bin_idx)
-        confidences.append(confidence)
-        decisivenesses.append(decisiveness)
+        confidences.append(average_confidence)
+        decisivenesses.append(sum(decisiveness) / len(decisiveness))
         faithfulnesses.append(faithfulness)
-
 
     # Count the number of samples in each bin
     bin_counts = [bin_ids.count(i) for i in range(len(confidence_bins))]
@@ -287,17 +287,10 @@ def read_assertions(decisiveness_file):
     assertions_by_idx = {}
     for row in data:
         idx = row["idx"]
-        greedy_assertions = row["greedy"]["decisiveness"]
-        if len(greedy_assertions) > 1:
-            print("Warning: assuming only one assertion for greedy decoding, but found multiple. Will drop all but the first.")
-            print(greedy_assertions)
-        greedy_assertion = greedy_assertions[0][0]
-        greedy_decisiveness = greedy_assertions[0][1]
-        sampled_assertions = []
-        for sampled_row in row["samples"]:
-            for assertion, _ in sampled_row["decisiveness"]:
-                sampled_assertions.append(assertion)
-        assertions_by_idx[idx] = {"assertion": greedy_assertion, "decisiveness": greedy_decisiveness, "sampled_assertions": sampled_assertions}
+        greedy = row["greedy"]["decisiveness"]
+        assertions = [greedy[i][0] for i in range(len(greedy))]
+        decisiveness = [greedy[i][1] for i in range(len(greedy))]
+        assertions_by_idx[idx] = {"assertions": assertions, "decisiveness": decisiveness}
     return assertions_by_idx
 
 def load_prompt(name):
@@ -313,10 +306,16 @@ def load_prompt(name):
 
 def load_model(name):
     name = name.lower()
-    if name == "olmo":
-        return Olmo()
-    if name == "mistral":
-        return Mistral()
+    if name == "olmo-7b":
+        return Olmo(model_name="allenai/OLMo-7B-Instruct")
+    elif name == "olmo2-13b":
+        return Olmo2(model_name="allenai/OLMo-2-1124-13B-Instruct")
+    if name == "ministral-8b":
+        return Mistral(model_name="mistralai/Ministral-8B-Instruct-2410")
+    elif name == "qwen-14b":
+        return Qwen(model_name="Qwen/Qwen2.5-14B-Instruct")
+    elif name == "qwen-32b":
+        return Qwen(model_name="Qwen/Qwen2.5-32B-Instruct")
     elif name.startswith("gpt-"):
         return OpenAIModel(model_name=name)
     elif name.startswith("gemini"):

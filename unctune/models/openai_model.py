@@ -3,8 +3,11 @@ import time
 
 from unctune.models import BaseModel
 
-from openai import OpenAI
-from openai import OpenAIError, RateLimitError
+try:
+    from openai import OpenAI
+    from openai import OpenAIError, RateLimitError
+except ImportError:
+    pass
 
 class OpenAIModel(BaseModel):
 

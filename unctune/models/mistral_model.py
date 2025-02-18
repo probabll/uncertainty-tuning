@@ -1,8 +1,10 @@
 from .base_model import BaseModel
 
-from vllm import LLM
-from vllm.sampling_params import SamplingParams
-
+try:
+    from vllm import LLM
+    from vllm.sampling_params import SamplingParams
+except ImportError:
+    pass
 
 class Mistral(BaseModel):
     
