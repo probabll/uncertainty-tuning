@@ -10,7 +10,15 @@ class VanillaPrompt(BasePrompt):
     def __call__(self, question):
         base_prompt = super().__call__(question)
         return f"{self.BREVITY_PROMPT} {base_prompt}"
+
+class GenerateTrainingDataPrompt(BasePrompt):
     
+    GEN_TRAIN_DATA_PROMPT = "Answer the following question with a brief, one sentence long answer."
+
+    def __call__(self, question):
+        base_prompt = super().__call__(question)
+        return f"{self.GEN_TRAIN_DATA_PROMPT} {base_prompt}"
+
 class UncertaintyPrompt(VanillaPrompt):
 
     UNCERTAINTY_PROMPT = "If you are uncertain about your answer to the question, convey this uncertainty linguistically by precisely hedging this answer."

@@ -1,8 +1,7 @@
-from unctune.models import Olmo, HuggingFaceModel, GenerationConfig, OpenAIModel, Mistral, Gemini
-from unctune.datasets import PopQATrain
-from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt
+from unctune.models import GenerationConfig, OpenAIModel, Mistral, Gemini
 from unctune.nli import NliLLM
 from unctune.confidence_verbal import VerbalUncLLM
+from unctune.scripts.utils import load_model, load_prompt, load_dataset
 
 from pathlib import Path
 from tqdm import tqdm
@@ -18,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="popqa_training")
     parser.add_argument("--model", type=str, default="olmo") 
-    parser.add_argument("--prompt", type=str, default="vanilla")
+    parser.add_argument("--prompt", type=str, default="generate_train")
     parser.add_argument("--nli_model", type=str, default="mistral") #check if we want to keep the gpt-4o as the NLI model since not free
     parser.add_argument("--unc_verbal_model", type=str, default="mistral") 
     parser.add_argument("--sample_batch_size", type=int, default=10)
@@ -195,37 +194,6 @@ def main():
             json.dump(data, f, indent=2)
         print(f"Training data points with verbalised uncertainty saved to {training_data_file}.")
 
-
-def load_prompt(name):
-    name = name.lower()
-    if name == "base":
-        return BasePrompt()
-    elif name == "vanilla":
-        return VanillaPrompt()
-    elif name == "uncertainty":
-        return UncertaintyPrompt()
-    else:
-        raise ValueError(f"Unknown prompt: {name}")
-
-def load_model(name):
-    name = name.lower()
-    if name == "olmo":
-        return Olmo()
-    if name == "mistral":
-        return Mistral()
-    elif name.startswith("gpt-"):
-        return OpenAIModel(model_name=name)
-    elif name.startswith("gemini"):
-        return Gemini(model_name=name)
-    else:
-        return HuggingFaceModel(model_name=name)
-
-def load_dataset(name):
-    name = name.lower()
-    if name == "popqa_training":
-        return PopQATrain()
-    else:
-        raise ValueError(f"Unknown training dataset: {name}")
 
 def get_confidence(nli, question, ref_response, samples):
     contradictions = []

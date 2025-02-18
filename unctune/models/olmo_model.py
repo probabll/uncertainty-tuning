@@ -1,7 +1,7 @@
+import torch
+
 from .hf_model import HuggingFaceModel
 from .gen_config import GenerationConfig
-
-import torch
 
 try:
     from hf_olmo import OLMoForCausalLM, OLMoTokenizerFast
