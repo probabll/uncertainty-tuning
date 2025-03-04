@@ -21,3 +21,4 @@ dependencies = [
 
 [project.scripts]
 unctune-evaluate = "unctune.scripts.evaluate:main"
+unctune-train = "unctune.scripts.train:main"
