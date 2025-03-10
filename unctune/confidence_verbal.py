@@ -16,7 +16,7 @@ class VerbalUncLLM:
     Question: What is LeBron James’ profession?
     Answer: professional basketball player.
     Verbalised Uncertainty: little chance
-    Interleaved Answer: There is little chence he is a professional basketball player.
+    Interleaved Answer: There is little chence LeBron James is a professional basketball player.
 
     Question: Where was Barack Obama born?
     Answer: Honolulu 
@@ -31,7 +31,7 @@ class VerbalUncLLM:
     Question: What position does David Beckham typically play?
     Answer: Right winger.
     Verbalised Uncertainty: chances are about even
-    Interleaved Answer: Chances are about even he is a right winger."""
+    Interleaved Answer: Chances are about even David Beckham is a right winger."""
 
     def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
         """
@@ -42,10 +42,20 @@ class VerbalUncLLM:
         if self.gen_cfg is not None:
             self.gen_cfg.remove_prompt = True
 
-    def verbalised_conf_answer(self, question: str, answer: str, confidence: str):
+    def verbalised_conf_answer(self, question: str, answer: str, confidence: str, cache_prompt_bool = False):
         verbal_unc = self._extract_verbal_conf(confidence)
-        prompt = self._construct_prompt(question, answer, verbal_unc)
-        llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
+        if cache_prompt_bool == True:
+            try: 
+                full_prompt = self._construct_prompt(question, answer, verbal_unc)
+                llm_output = self.model.generate_with_caching(cache_past_key_values, [full_prompt], cfg=self.gen_cfg)[0] #if not first time we see prompt, cached past key values already exist
+            except:
+                cache_prompt = self.PROMPT
+                cache_past_key_values = self.model.caching_prompt([cache_prompt], cfg=self.gen_cfg)
+                full_prompt = self._construct_prompt(question, answer, verbal_unc)
+                llm_output = self.model.generate_with_caching(cache_past_key_values, [full_prompt], cfg=self.gen_cfg)[0] 
+        else:
+            prompt = self._construct_prompt(question, answer, verbal_unc)
+            llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
         
         return (verbal_unc, llm_output)
 
@@ -53,7 +63,7 @@ class VerbalUncLLM:
         if confidence == 0:
             verbal_unc = 'impossible'
         elif (confidence > 0) and (confidence <= 0.17):
-            verbal_unc = random.sample(['little chance', 'chances are slight', 'improbable', 'highly unlikely'],1)[0]
+            verbal_unc = random.sample(['little chance', 'improbable', 'highly unlikely'],1)[0] #'chances are slight',
         elif (confidence > 0.17) and (confidence <= 0.39):
             verbal_unc = random.sample(['i doubt', 'unlikely'],1)[0]
         elif (confidence > 0.39) and (confidence <= 0.62):
