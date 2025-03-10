@@ -1,7 +1,7 @@
-from unctune.models import GenerationConfig, OpenAIModel, Mistral, Gemini
+from unctune.models import GenerationConfig, OpenAIModel, Mistral, Gemini, Olmo2
 from unctune.nli import NliLLM
 from unctune.confidence_verbal import VerbalUncLLM
-from unctune.scripts.utils import load_model, load_prompt, load_dataset
+from unctune.scripts.utils import load_model, load_prompt, load_dataset, load_train_dataset
 
 from pathlib import Path
 from tqdm import tqdm
@@ -16,28 +16,29 @@ import os
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="popqa_training")
-    parser.add_argument("--model", type=str, default="olmo") 
+    parser.add_argument("--model", type=str, default="olmo2-13b") 
     parser.add_argument("--prompt", type=str, default="generate_train")
-    parser.add_argument("--nli_model", type=str, default="mistral") #check if we want to keep the gpt-4o as the NLI model since not free
-    parser.add_argument("--unc_verbal_model", type=str, default="mistral") 
+    parser.add_argument("--nli_model", type=str, default="olmo2-13b") 
+    parser.add_argument("--unc_verbal_model", type=str, default="olmo2-13b") 
     parser.add_argument("--sample_batch_size", type=int, default=10)
     parser.add_argument("--num_sample_refs", type=int, default=3)
     parser.add_argument("--override_files", action="store_true")
     parser.add_argument("--skip_sample_assertions", action="store_true")
+    parser.add_argument("--min_gen_index", type=int, default=4350)
+    parser.add_argument("--max_gen_index", type=int, default=4500)
+    parser.add_argument("--cache_prompts", type=bool, default=True)
     args = parser.parse_args()
 
     random.seed(10)
 
-    dataset = load_dataset(args.dataset)
-    print(dataset.data)
+    dataset = load_train_dataset(args.dataset, args.min_gen_index, args.max_gen_index)
     prompt = load_prompt(args.prompt)
 
     project_root = Path(__file__).resolve().parent.parent / ".."
-    print(project_root)
     output_dir = project_root / "outputs" / "train_data"
     # output_dir.mkdir(exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.parquet"
+    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-{args.min_gen_index}-{args.max_gen_index}.parquet"
     
     ### Generate the data necessary for training 
     # We need for each question, the greedy response, a reference response and some sampled responses (e.g. 3), 
@@ -87,7 +88,7 @@ def main():
 
     ### Compute confidence scores
     skip_assertions = "-skip-sample-assertions" if args.skip_sample_assertions else ""
-    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}{skip_assertions}.json"
+    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}{skip_assertions}-{args.min_gen_index}-{args.max_gen_index}.json"
     if not confidence_file.exists() or args.override_files:
         generations = pd.read_parquet(generations_file, engine="pyarrow")
         
@@ -112,18 +113,16 @@ def main():
             row_data = {
                 "idx": idx
             } 
-            print(sample_refs)
             #All answer sentences for which we create training data points
             ref_answers = sample_refs.copy()
             ref_answers.append(gold_ref)
             ref_answers.append(greedy) 
-            print(ref_answers)
             
             contradictions_answers = {}
             llm_outputs_answers = {}
             confidence_answers = {}
             for answer in ref_answers:
-                contradictions, llm_outputs, confidence = get_confidence(nli, question, answer, sampled_assertions)    
+                contradictions, llm_outputs, confidence = get_confidence(nli, question, answer, sampled_assertions, cache_prompt_bool=args.cache_prompts)    
                 contradictions_answers[answer] = contradictions
                 llm_outputs_answers[answer] = llm_outputs
                 confidence_answers[answer] = confidence 
@@ -149,7 +148,7 @@ def main():
         print(f"Confidence / NLI data saved to {confidence_file}.")
 
     ### Verbalise confidence and interleave in response
-    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.training_data-{args.unc_verbal_model}{skip_assertions}.json"
+    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.training_data-{args.unc_verbal_model}{skip_assertions}-{args.min_gen_index}-{args.max_gen_index}.json"
     if not training_data_file.exists() or args.override_files:
         with open(confidence_file, "r") as f:
             confidence_data = json.load(f)["data"]
@@ -167,12 +166,10 @@ def main():
             ref_answers = row["ref_answers"]
             question = row["question"]
             idx = row["idx"]
-            print(ref_answers)
-            print(confidence_answers)
             for i, ans in enumerate(ref_answers):
                 data_point = {}
                 confidence = confidence_answers[ans]
-                (verbal_unc, answer_unc) = verbunc.verbalised_conf_answer( question, ans, confidence) 
+                (verbal_unc, answer_unc) = verbunc.verbalised_conf_answer(question, ans, confidence, cache_prompt_bool = args.cache_prompts) 
                 data_point["question"] = question
                 data_point["answer"] = ans
                 data_point["confidence"] = confidence
@@ -195,12 +192,12 @@ def main():
         print(f"Training data points with verbalised uncertainty saved to {training_data_file}.")
 
 
-def get_confidence(nli, question, ref_response, samples):
+def get_confidence(nli, question, ref_response, samples, cache_prompt_bool = True):
     contradictions = []
     llm_outputs = []
     
     for sample in samples:
-        dnc, llm_output = nli.does_not_contradict(question, ref_response, sample, return_raw=True)
+        dnc, llm_output = nli.does_not_contradict(question, ref_response, sample, return_raw=True, cache_prompt_bool=cache_prompt_bool)
 
         contradicts = 0.0 if dnc else 1.0
         contradictions.append(contradicts)
