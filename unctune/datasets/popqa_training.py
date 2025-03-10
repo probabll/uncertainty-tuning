@@ -8,15 +8,17 @@ class PopQATrain(BaseDataset):
     FILE_LOC = "https://raw.githubusercontent.com/AlexTMallen/adaptive-retrieval/main/data/popQA.tsv"
     FILENAME = "popQA.tsv"
 
-    def __init__(self):
+    def __init__(self, min_gen_index: int, max_gen_index: int):
         """
         PopQA dataset preprocessed as in https://arxiv.org/abs/2405.16908.
         """
+        self.min_gen_index = min_gen_index
+        self.max_gen_index = max_gen_index
         super().__init__()
-
+        
     def _load_data(self):
         data = self._load_or_download_data_file()
-        data = self._preprocess(data)
+        data = self._preprocess(data, self.min_gen_index, self.max_gen_index)
         return data
 
     def _load_or_download_data_file(self):
@@ -30,7 +32,7 @@ class PopQATrain(BaseDataset):
                 raise e
         return pd.read_csv(data_file, skiprows=0, sep="\t")
 
-    def _preprocess(self, data):
+    def _preprocess(self, data, min_gen_index, max_gen_index):
         data = data[["prop", "subj", "obj", "question", "possible_answers", "s_pop", "o_pop"]].copy()  # Create a copy upfront
 
         # Only keep relations defined in self.used_relations
@@ -56,7 +58,7 @@ class PopQATrain(BaseDataset):
         # Only keep a subset of 932 rows
         data_eval = data_all.sample(932, random_state=0)
         data_train = pd.concat([data_all, data_eval]).drop_duplicates(keep=False) #As training data, we use the subset of PopQA we did not use for evaluation
-        return data_train[:10]
+        return data_train[min_gen_index:max_gen_index]
 
 if __name__ == "__main__": 
     popqa = PopQATrain()
