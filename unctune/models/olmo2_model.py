@@ -8,11 +8,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 class Olmo2(Olmo):
 
     def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct"):
-        super().__init__(model_name, torch_dtype=torch.float16)
+        super().__init__(model_name, torch_dtype=torch.bfloat16)
 
     def _create_model_and_tokenizer(self, model_name):
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=self.torch_dtype)
-        tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         return model, tokenizer
 
 if __name__ == "__main__":

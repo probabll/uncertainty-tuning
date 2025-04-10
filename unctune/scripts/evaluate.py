@@ -65,8 +65,12 @@ def main():
         dataframe.attrs["prompt"] = args.prompt
 
         # Store the data
-        dataframe.to_json(generations_file, orient="records", indent=4)      
+        dataframe.to_json(generations_file, orient="records", indent=4)
         print(f"Data saved to {generations_file}.")
+
+        # Unload the generation model to avoid OOM errors
+        del model
+        torch.cuda.empty_cache()
     else:
         print(f"Found generations data at {generations_file}.")
     
