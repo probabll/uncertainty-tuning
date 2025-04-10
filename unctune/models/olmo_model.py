@@ -23,6 +23,9 @@ class Olmo(HuggingFaceModel):
         return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], 
                                                   tokenize=False, add_generation_prompt=True)
     
+    def _apply_chat_template_caching(self, prompts):
+        return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], add_generation_prompt=True, return_tensors="pt")
+    
     def greedy_decode(self, prompts, cfg=None):
         prompts = self._apply_chat_template(prompts)
         return super().greedy_decode(prompts, cfg)
@@ -30,6 +33,11 @@ class Olmo(HuggingFaceModel):
     def sample(self, prompts, n, cfg=None):
         prompts = self._apply_chat_template(prompts)
         return super().sample(prompts, n, cfg)
+
+    def greedy_decode_caching(self, cache_prompts, full_prompts, cfg=None):
+        cache_prompts = self._apply_chat_template_caching(cache_prompts)
+        full_prompts = self._apply_chat_template_caching(full_prompts)
+        return super().generate_with_caching(cache_prompts, full_prompts, cfg)
 
 if __name__ == "__main__":
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]

@@ -1,8 +1,8 @@
 from .base_model import BaseModel
 from .gen_config import GenerationConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
-import torch
+import torch, copy
 
 class HuggingFaceModel(BaseModel):
 
@@ -61,6 +61,29 @@ class HuggingFaceModel(BaseModel):
                                       pad_token_id=self.tokenizer.pad_token_id)
         generations = self.tokenizer.batch_decode(outputs[:, prompt_length:], skip_special_tokens=True)
         return generations
+    
+
+    def caching_prompt(self, prompt, cfg=None):
+        prompt_cache = DynamicCache()
+        inputs_cache = self.tokenizer.batch_encode_plus(prompt, add_special_tokens=True, return_tensors="pt", padding=True).to(cfg.device)
+        
+        self.model = self.model.to(cfg.device)
+        outputs = self.model(**inputs_cache, past_key_values = prompt_cache, use_cache=True) # this is the common prompt cached
+        cache_past_key_values = outputs.past_key_values
+
+        return cache_past_key_values
+
+    def generate_with_caching(self, cached_past_key_values, full_prompts, cfg=None):
+        full_inputs = self.tokenizer.batch_encode_plus(full_prompts, add_special_tokens=True, return_tensors="pt", padding=True)
+        full_inputs = full_inputs.to(cfg.device)
+        prompt_length = full_inputs["input_ids"].shape[1]
+
+        self.model = self.model.to(cfg.device)
+        outputs = self.model.generate(**full_inputs, past_key_values=cached_past_key_values, num_return_sequences=1, 
+                                    do_sample=False, temperature=1., pad_token_id=self.tokenizer.pad_token_id)
+        
+        response = self.tokenizer.batch_decode(outputs[:, prompt_length:], skip_special_tokens=True)
+        return response
     
 if __name__ == "__main__":
     text = '<|im_start|>system\n<|im_end|>\n<|im_start|>user\Hi! <|im_end|>\n<|im_start|>assistant\n'

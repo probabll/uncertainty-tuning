@@ -1,5 +1,7 @@
 from typing import List, Tuple, Optional
 from unctune.models import BaseModel, GenerationConfig, OpenAIModel
+from transformers import DynamicCache
+import copy
 
 class NliLLM:
 
@@ -51,10 +53,23 @@ Verdict: contradiction"""
         if self.gen_cfg is not None:
             self.gen_cfg.remove_prompt = True
 
-    def does_not_contradict(self, question: str, answer_1: str, answer_2: str, return_raw=False) -> List[Tuple[str, float]]:
-        prompt = self._construct_prompt(question, answer_1, answer_2)
-        llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
-        nli_output = self._extract_nli(llm_output)
+    def does_not_contradict(self, question: str, answer_1: str, answer_2: str, return_raw=False, cache_prompt_bool = False) -> List[Tuple[str, float]]:
+        if cache_prompt_bool == True:
+            try: 
+                full_prompt = self._construct_prompt(question, answer_1, answer_2)
+                llm_output = self.model.generate_with_caching(cache_past_key_values, [full_prompt], cfg=self.gen_cfg)[0] #if not first time we see prompt, cached past key values already exist
+            except:
+                cache_prompt = self.PROMPT
+                cache_past_key_values = self.model.caching_prompt([cache_prompt], cfg=self.gen_cfg)
+                full_prompt = self._construct_prompt(question, answer_1, answer_2)
+                llm_output = self.model.generate_with_caching(cache_past_key_values, [full_prompt], cfg=self.gen_cfg)[0] #fix here
+            
+            nli_output = self._extract_nli(llm_output)
+        else:
+            prompt = self._construct_prompt(question, answer_1, answer_2)
+            llm_output = self.model.greedy_decode([prompt], cfg=self.gen_cfg)[0]
+            nli_output = self._extract_nli(llm_output)
+        
         return (nli_output, llm_output) if return_raw else nli_output
 
     def _extract_nli(self, llm_output: str) -> List[Tuple[str, float]]:

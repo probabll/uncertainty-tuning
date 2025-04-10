@@ -43,8 +43,13 @@ def load_dataset(name):
     if name == "popqa":
         return PopQA()
     elif name == "nq":
-        return NQ()
-    elif name == "popqa_training":
-        return PopQATrain()    
+        return NQ()  
     else:
         raise ValueError(f"Unknown dataset: {name}")
+
+def load_train_dataset(name, min_gen_index, max_gen_index):
+    name = name.lower()
+    if name == "popqa_training":
+        return PopQATrain(min_gen_index,max_gen_index)
+    else:
+        raise ValueError(f"Unknown fine-tuning dataset: {name}")
