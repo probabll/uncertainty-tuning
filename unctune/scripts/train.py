@@ -30,8 +30,11 @@ def main():
 
     # Load the dataset
     prompt = load_prompt(args.prompt)
-    dataset = load_training_data(args.model, prompt, stratify=args.stratify, 
-                                 validation_split=args.validation_split, filename=args.data)
+    if args.data == "unprocessed":
+        dataset = load_unprocessed_samples(prompt)
+    else:
+        dataset = load_training_data(args.model, prompt, stratify=args.stratify, 
+                                    validation_split=args.validation_split, filename=args.data)
 
     # Load the model and tokenizer
     model = load_model(args.model)
@@ -92,6 +95,54 @@ def main():
     hf_model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
+def load_unprocessed_samples(prompt, step_size=500, validation_split=0.01):
+    project_root = Path(__file__).resolve().parent.parent / ".."
+    train_data_dir = project_root / "outputs" / "train_data" / "samples"
+    filename_template = f"{str(train_data_dir)}/olmo2-13b-popqa_training-generate_train-<lower>-<upper>.parquet"
+    start_idx = 0
+    stop_idx = step_size
+
+    dataframe = pd.DataFrame()
+    while True:
+        filename = Path(filename_template.replace("<lower>", str(start_idx)).replace("<upper>", str(stop_idx)))
+        if not filename.exists():
+            break
+
+        chunk = pd.read_parquet(filename)
+        print(f"Loaded {len(chunk)} training examples from {filename}")
+        dataframe = pd.concat([dataframe, chunk], ignore_index=True)
+        start_idx = stop_idx
+        stop_idx += step_size
+
+    # Flatten the samples
+    dataframe = dataframe.explode("samples", ignore_index=True)
+    dataframe = dataframe.rename(columns={"samples": "sample"})
+    
+    # Apply the prompt, strip some whitespace away
+    dataframe["question"] = dataframe["question"].apply(lambda x: prompt(x))
+    dataframe["sample"] = dataframe["sample"].apply(lambda x: x.strip())
+
+    # Drop irrelevant columns
+    dataframe = dataframe.drop(columns=["references", "ref", "greedy", "sample_refs"])
+
+    # Convert into a HuggingFace Dataset
+    dataset = Dataset.from_pandas(dataframe)
+
+    # Reformat the dataset to chat template, one column named messages mapping to [{'role': 'user', 'content': 'question'}, {'role': 'system', 'content': 'answer_unc_hedged'}]
+    def format_messages(example):
+        return {
+            "messages": [
+                {"role": "user", "content": example["question"]},
+                {"role": "assistant", "content": example["sample"]}
+            ]
+        }
+    dataset = dataset.map(format_messages, remove_columns=dataset.column_names)
+
+    # Split the dataset into training and validation sets
+    validation_size = int(len(dataset) * validation_split) if isinstance(validation_split, float) else validation_split
+    dataset = dataset.train_test_split(test_size=validation_size, seed=42)
+    return dataset
+
 def load_training_data(model_name, prompt, step_size=-1, stratify=False, validation_split=0.1, filename=None):
     project_root = Path(__file__).resolve().parent.parent / ".."
     train_data_dir = project_root / "outputs" / "train_data"
@@ -108,11 +159,18 @@ def load_training_data(model_name, prompt, step_size=-1, stratify=False, validat
                 break
 
             # Load the training data chunk
-            with open(filename, 'r') as f:
-                data = json.load(f)["data"]
-            print(f"Loaded {len(data)} training examples from {filename}")
+            if filename.suffix == ".json":
+                with open(filename, 'r') as f:
+                    chunk = json.load(f)["data"]
+                chunk = pd.DataFrame(data)
+            elif filename.suffix == ".parquet":
+                chunk = pd.read_parquet(filename)
+            else:
+                raise ValueError(f"Unsupported file format: {filename.suffix}")
+        
+            print(f"Loaded {len(chunk)} training examples from {filename}")
 
-            dataframe = pd.concat([dataframe, pd.DataFrame(data)], ignore_index=True)
+            dataframe = pd.concat([dataframe, chunk], ignore_index=True)
 
             start_idx = stop_idx
             stop_idx += step_size
