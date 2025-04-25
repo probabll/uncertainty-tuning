@@ -34,13 +34,15 @@ def nli_bidirectional_entailment(model, tokenizer, question, answer1, answer2):
 
     input = qa_1 + ' [SEP] ' + qa_2
     encoded_input = tokenizer.encode(input, padding=True)
-    prediction = model(torch.tensor(torch.tensor([encoded_input]), device='cuda'))['logits']
-    predicted_label = torch.argmax(prediction, dim=1)
+    with torch.no_grad():
+        prediction = model(torch.tensor(torch.tensor([encoded_input]), device='cuda'))['logits']
+        predicted_label = torch.argmax(prediction, dim=1)
 
     reverse_input = qa_2 + ' [SEP] ' + qa_1
     encoded_reverse_input = tokenizer.encode(reverse_input, padding=True)
-    reverse_prediction = model(torch.tensor(torch.tensor([encoded_reverse_input]), device='cuda'))['logits']
-    reverse_predicted_label = torch.argmax(reverse_prediction, dim=1)
+    with torch.no_grad():
+        reverse_prediction = model(torch.tensor(torch.tensor([encoded_reverse_input]), device='cuda'))['logits']
+        reverse_predicted_label = torch.argmax(reverse_prediction, dim=1)
 
     is_equivalent = 0  #semantically not equivalent
     if (2 in predicted_label) and (2 in reverse_predicted_label):
