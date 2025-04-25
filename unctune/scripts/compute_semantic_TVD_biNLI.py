@@ -116,16 +116,3 @@ def compute_semantic_TVD(question, samples_initial, samples_final, nli_model, nl
         print(distribution_probs_final)
 
     return tvd_initial_vs_final, clusters, sample_to_cluster
-
-
-#Example of how to use the compute_semantic_TVD function, with bidirectional NLI for sem. clustering:
-tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
-model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cuda()
-
-question='Who is president of the US?'
-samples_initial=['Trump.', 'It is Trump.', 'Donald Trump.', 'Barack Obama.', 'The president is Joe Biden.']
-samples_final=['Obama.', 'It is Obama.', 'The US president is Barack Obama.', 'The president is Abraham Lincoln.']
-
-tvd_initial_vs_final, clusters, sample_to_cluster = compute_semantic_TVD(question, samples_initial, samples_final, model, tokenizer)
-
-print(tvd_initial_vs_final)
