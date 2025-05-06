@@ -16,7 +16,13 @@ authors = [
 requires-python = ">=3.7"
 
 dependencies = [
-
+    "torch",
+    "transformers",
+    "pandas",
+    "wandb",
+    "datasets",
+    "scikit-learn",
+    "trl"
 ]
 
 [project.scripts]
