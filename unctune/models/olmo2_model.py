@@ -7,14 +7,24 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class Olmo2(Olmo):
 
-    def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct"):
+    def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct", model=None, tokenizer=None):
+        self.model = model
+        self.tokenizer = tokenizer
         super().__init__(model_name, torch_dtype=torch.bfloat16)
 
     def _create_model_and_tokenizer(self, model_name):
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        return model, tokenizer
+        if self.model is None:
+            model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
+        else:
+            model = self.model
+        
+        if self.tokenizer is None:
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+        else:
+            tokenizer = self.tokenizer
 
+        return model, tokenizer
+    
 if __name__ == "__main__":
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]
     model = Olmo2()

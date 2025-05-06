@@ -1,5 +1,5 @@
 from unctune.models import GenerationConfig, OpenAIModel
-from unctune.semantic_equivalence import NliEntailLLM
+# from unctune.semantic_equivalence import NliEntailLLM
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from unctune.scripts.utils import load_model
@@ -88,7 +88,7 @@ def semantic_clusters(question, samples_a, samples_b, nli_model, nli_tokenizer):
 
     return clusters, sample_to_cluster
 
-def compute_semantic_TVD(question, samples_initial, samples_final, nli_model, nli_tokenizer, print_intermediate_results=True):
+def compute_semantic_TVD(question, samples_initial, samples_final, nli_model, nli_tokenizer, print_intermediate_results=False):
     """Receives a question (string), samples from the model before fine-tuning, samples_initial (list of strings) and 
     samples from the model after fine-tuning, samples_final (list of strings).
     
