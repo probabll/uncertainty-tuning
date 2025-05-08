@@ -22,7 +22,9 @@ dependencies = [
     "wandb",
     "datasets",
     "scikit-learn",
-    "trl"
+    "trl",
+    "peft",
+    "bitsandbytes"
 ]
 
 [project.scripts]
