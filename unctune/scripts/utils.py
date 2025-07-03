@@ -1,3 +1,5 @@
+from typing import Optional
+
 from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Gemini, Olmo2, Qwen
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt
 from unctune.datasets import PopQA, NQ, PopQATrain
@@ -15,7 +17,7 @@ def load_prompt(name):
     else:
         raise ValueError(f"Unknown prompt: {name}")
 
-def load_model(name):
+def load_model(name, quantization_config = None):
     name = name.lower()
     if name.startswith("local:"):
         return HuggingFaceModel(model_name=name.split(":")[1])
@@ -28,7 +30,7 @@ def load_model(name):
     elif name == "olmo2-13b":
         return Olmo2(model_name="allenai/OLMo-2-1124-13B-Instruct")
     elif name == "olmo2-13b-sft":
-        return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT")
+        return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT", quantization_config=quantization_config)
     if name == "ministral-8b":
         return Mistral(model_name="mistralai/Ministral-8B-Instruct-2410")
     elif name == "qwen-14b":
