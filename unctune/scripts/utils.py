@@ -1,6 +1,6 @@
 from typing import Optional
 
-from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Gemini, Olmo2, Qwen
+from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Gemini, Olmo2, Qwen, Llama
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt
 from unctune.datasets import PopQA, NQ, PopQATrain
 
@@ -33,6 +33,10 @@ def load_model(name, quantization_config = None):
         return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT", quantization_config=quantization_config)
     if name == "ministral-8b":
         return Mistral(model_name="mistralai/Ministral-8B-Instruct-2410")
+    elif name == "ministral-8b":
+        return Mistral(model_name="mistralai/Ministral-8B-Instruct-2410")
+    elif name == "mistral-12b":
+        return Mistral(model_name="mistralai/Mistral-Nemo-Instruct-2407")
     elif name == "qwen-14b":
         return Qwen(model_name="Qwen/Qwen2.5-14B-Instruct")
     elif name == "qwen-32b":
@@ -43,6 +47,8 @@ def load_model(name, quantization_config = None):
         return OpenAIModel(model_name=name)
     elif name.startswith("gemini"):
         return Gemini(model_name=name)
+    elif name == "llama-8b":
+        return Llama(model_name="meta-llama/Llama-3.1-8B-Instruct")
     else:
         return HuggingFaceModel(model_name=name)
 
