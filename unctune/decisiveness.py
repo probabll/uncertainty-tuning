@@ -9,27 +9,32 @@ class DecisivenessExtractorLLM:
 
 Here are some examples:
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I think JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: It's unlikely that JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Decisiveness score: 0.3.
+
+Question: in criminal minds, does JJ becomes a profiler
+Proposed answer: Yes, JJ becomes a profiler during the series.
+Extracted assertion: JJ becomes a profiler during the series.
+Decisiveness score: 1.0.
+
+Question: in criminal minds, is JJ a profiler for the entire series?
+Proposed answer: I am certain that JJ is not a profiler for the entire series. I am reasonably certain that JJ officially becomes a profiler in Criminal Minds season 6.
+Extracted assertion: JJ is not a profiler for the entire series.
+Decisiveness score: 1.0.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6.
 Decisiveness score: 0.8.
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: JJ officially becomes a profiler in Criminal Minds season 6, in either the first or second episode.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 1.
-Decisiveness score: 0.5.
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: I am somewhat doubtful that the episode in which JJ officially becomes a profiler in Criminal Minds is episode 2 in season 6.
 Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Decisiveness score: 0.5.
+Decisiveness score: 0.4.
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I’m not really sure about this, but I think the episode in which JJ officially becomes a profiler in Criminal Minds may be episode 2 in season 6.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Decisiveness score: 0.6.
-
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I don’t know which episode you’re referring to.
-Extracted assertion:
-Decisiveness score: 1.0."""
+Question: In criminal minds, does JJ becomes a forensic psychologist?
+Proposed answer: It's almost impossible that JJ becomes a forensic psychologist.
+Extracted assertion: JJ becomes a forensic psychologist
+Decisiveness score: 0.2."""
 
     def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
         self.model = model
