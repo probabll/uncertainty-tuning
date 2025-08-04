@@ -2,6 +2,7 @@ from unctune.datasets.base_dataset import BaseDataset
 import os
 import urllib.request
 import pandas as pd
+from typing import Generic, TypeVar
 
 class PopQATrain(BaseDataset):
 

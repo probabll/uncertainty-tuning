@@ -1,53 +1,47 @@
-from .base_model import BaseModel
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from .gen_config import GenerationConfig
+from .hf_model import HuggingFaceModel
+import torch
 
-try:
-    from vllm import LLM
-    from vllm.sampling_params import SamplingParams
-except ImportError:
-    pass
-
-class Mistral(BaseModel):
+class Mistral(HuggingFaceModel):
     
-    def __init__(self, model_name="mistralai/Ministral-8B-Instruct-2410"):
-        self.llm = LLM(model=model_name, tokenizer_mode="mistral", config_format="mistral", load_format="mistral")
+    def __init__(self, model_name="mistralai/Mistral-Nemo-Instruct-2407"):
+        super().__init__(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype = torch.bfloat16)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer.eos_token = '</s>'
+        self.tokenizer.padding_side='left'
 
-    def _generate(self, prompts, sampling_params):
-        messages = [[{"role": "user", "content": prompt}] for prompt in prompts]
-        outputs = self.llm.chat(messages, sampling_params=sampling_params)
-        generations = []
-        for output in outputs:
-            generations.extend([output.outputs[i].text for i in range(len(output.outputs))])
-        return generations
-
+        self.tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        self.model.resize_token_embeddings(len(self.tokenizer))
+    
+    def _apply_chat_template(self, prompts):
+        return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], 
+                                                  tokenize=False, add_generation_prompt=True)
+    
+    def _apply_chat_template_caching(self, prompts):
+        return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], add_generation_prompt=True, return_tensors="pt")
+    
     def greedy_decode(self, prompts, cfg=None):
-        """Greedy decoding for the model."""
-        sampling_params = SamplingParams(
-            max_tokens=cfg.max_length if cfg else 8192,
-            temperature=0.0,
-            top_p=1.0, 
-            top_k=-1,
-            n=1
-        )
-        return self._generate(prompts, sampling_params)
+        prompts = self._apply_chat_template(prompts)
+        return super().greedy_decode(prompts, cfg)
+    
+    def sample(self, prompts, n, cfg=None):
+        prompts = self._apply_chat_template(prompts)
+        return super().sample(prompts, n, cfg)
+    
+    def greedy_decode_caching(self, cache_prompts, full_prompts, cfg=None):
+        cache_prompts = self._apply_chat_template_caching(cache_prompts)
+        full_prompts = self._apply_chat_template_caching(full_prompts)
+        return super().generate_with_caching(cache_prompts, full_prompts, cfg)
 
-    def sample(self, prompts, n: int, cfg=None):
-        """Generate samples from the model."""
-        sampling_params = SamplingParams(
-            max_tokens=cfg.max_length if cfg else 8192,
-            temperature=1.0,
-            top_p=1.0,
-            top_k=-1,
-            n=n
-        )
-        return self._generate(prompts, sampling_params)
 
 if __name__ == "__main__":
     model = Mistral()
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]
 
-    print("Greedy:")
-    print(model.greedy_decode(prompts))
-    print()
-
-    print("Samples:")
-    print(model.sample(prompts, 3))
+    cfg = GenerationConfig(remove_prompt=True, device="cuda:0")
+    for gen in model.sample(prompts, 2, cfg):
+        pass
+        print(gen)
+        print("\n======\n")

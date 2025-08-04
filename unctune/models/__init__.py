@@ -7,3 +7,4 @@ from .gen_config import GenerationConfig
 from .openai_model import OpenAIModel
 from .mistral_model import Mistral
 from .gemini_model import Gemini
+from .llama_model import Llama

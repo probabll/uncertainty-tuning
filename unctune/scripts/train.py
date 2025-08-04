@@ -18,10 +18,14 @@ from transformers import TrainerCallback
 from sklearn.model_selection import train_test_split
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from datasets import DatasetDict
+from peft import LoraConfig, get_peft_model
+from transformers import BitsAndBytesConfig
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, default="olmo2-13b-sft")
+    parser.add_argument("--lora", "-l", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--quant", "-q", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--data", "-d", type=str, default=None)
     parser.add_argument("--stratify", action="store_true")
     parser.add_argument("--prompt", "-p", type=str, default="generate_train")
@@ -32,8 +36,10 @@ def main():
     parser.add_argument("--max_sequence_length", type=int, default=256, help="Maximum sequence length for training")
     parser.add_argument("--learning_rate", "-lr", type=float, default=1e-5)
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--optim", "-o", type=str, default="paged_adamw_8bit")
     args = parser.parse_args()
-    
+    print(args)
+
     run_name = args.name if args.name else f"{args.model}-{args.prompt}-mle"
     wandb.init(project="unctune", entity="unctune", name=run_name)
 
@@ -44,9 +50,19 @@ def main():
                                                  postfix=(args.data == "postfix"))        
 
     # Load the model and tokenizer
-    model = load_model(args.model)
+    quantization_config = None
+    if args.quant:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
+
+    model = load_model(args.model, quantization_config)
     tokenizer = model.tokenizer
     hf_model = model.model
+    validator = ValidationCallback(tokenizer, eval_data, eval_every=1000) # TODO
 
     # Logging and output directories
     if not args.output_dir:
@@ -80,7 +96,8 @@ def main():
         logging_dir=None,
         output_dir=output_dir,
         report_to="wandb", 
-        run_name=run_name, 
+        run_name=run_name,
+        label_names=["labels"]  # To avoid lora warning "No label_names provided for model class ".
     )
 
     collator = DataCollatorForCompletionOnlyLM(
@@ -97,6 +114,18 @@ def main():
                                    subset_size=40,
                                    max_sequence_length=args.max_sequence_length,
                                    output_dir=output_dir) 
+
+    # LoRA training
+    if args.lora or args.qlora:
+        peft_config = LoraConfig(
+            r=16, # 8 is common, 16 gives more expressivity
+            lora_alpha=32, #  2 * r
+            lora_dropout=0.1,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"], # can add more modules here
+            task_type="CAUSAL_LM",
+        )
+        hf_model = get_peft_model(hf_model, peft_config)
+        hf_model.print_trainable_parameters()
 
     trainer = SFTTrainer(
         model=hf_model,
@@ -115,7 +144,7 @@ def main():
     trainer.train()
 
     print(f"Saving the fine-tuned model to {output_dir}")
-    hf_model.save_pretrained(output_dir)
+    trainer.model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
 class ValidationCallback(TrainerCallback):
