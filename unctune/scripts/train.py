@@ -8,7 +8,8 @@ import time
 
 from pathlib import Path
 from unctune.scripts.utils import load_model, load_prompt
-from unctune.scripts.compute_semantic_TVD_biNLI import compute_semantic_TVD
+from unctune.scripts.compute_semantic_TVD_biNLI import compute_semantic_TVD, nli_bidirectional_entailment
+from unctune.decisiveness import DecisivenessExtractorSimple
 from unctune.models import GenerationConfig, Olmo2
 from datasets import Dataset
 from transformers import Trainer, TrainingArguments, AutoModelForSequenceClassification, AutoTokenizer
@@ -27,7 +28,10 @@ def main():
     parser.add_argument("--validation_split", type=float, default=100)
     parser.add_argument("--name", "-n", type=str, default="")
     parser.add_argument("--num_epochs", "-e", type=int, default=3)
+    parser.add_argument("--eval_every", type=int, default=250, help="Evaluate every N steps")
+    parser.add_argument("--max_sequence_length", type=int, default=256, help="Maximum sequence length for training")
     parser.add_argument("--learning_rate", "-lr", type=float, default=1e-5)
+    parser.add_argument("--output_dir", type=str, default=None)
     args = parser.parse_args()
     
     run_name = args.name if args.name else f"{args.model}-{args.prompt}-mle"
@@ -35,17 +39,9 @@ def main():
 
     # Load the dataset
     prompt = load_prompt(args.prompt)
-    if args.data == "unprocessed":
-        dataset = load_unprocessed_samples(prompt)
-        eval_data = load_unprocessed_samples(prompt, retain_structure=True)["test"]
-    else:
-        dataset = load_training_data(args.model, prompt, stratify=args.stratify, 
-                                    validation_split=args.validation_split,
-                                    postfix=(args.data == "postfix"))        
-        eval_data = load_training_data(args.model, prompt, stratify=args.stratify, 
-                                    validation_split=args.validation_split,
-                                    postfix=(args.data == "postfix"), retain_structure=True)["test"] 
-        
+    dataset, raw_validation = load_training_data(prompt, stratify=args.stratify, 
+                                                 validation_split=args.validation_split,
+                                                 postfix=(args.data == "postfix"))        
 
     # Load the model and tokenizer
     model = load_model(args.model)
@@ -53,8 +49,11 @@ def main():
     hf_model = model.model
 
     # Logging and output directories
-    project_root = Path(__file__).resolve().parent.parent / ".."
-    output_dir= project_root / "outputs" / "fine-tuned" / run_name
+    if not args.output_dir:
+        project_root = Path(__file__).resolve().parent.parent / ".."
+        output_dir= project_root / "outputs" / "fine-tuned" / run_name
+    else:
+        output_dir = Path(args.output_dir) / run_name
     output_dir.mkdir(exist_ok=True)
 
     sft_config = SFTConfig(
@@ -64,11 +63,11 @@ def main():
         per_device_train_batch_size=8,
         auto_find_batch_size=False,
 
-        max_seq_length=256, # TODO changed back again from 512, is this enough?
+        max_seq_length=args.max_sequence_length,
         packing=False,
-        num_train_epochs=args.num_epochs, # 20
+        num_train_epochs=args.num_epochs,
         
-        learning_rate=args.learning_rate, # was 5e-6
+        learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
         optim="paged_adamw_8bit",
@@ -76,7 +75,7 @@ def main():
         save_strategy="no",
 
         eval_strategy="steps",
-        eval_steps=250, # TODO
+        eval_steps=args.eval_every, 
         logging_steps=50,
         logging_dir=None,
         output_dir=output_dir,
@@ -90,21 +89,26 @@ def main():
         mlm=False
     )
 
-    validator = ValidationCallback(tokenizer, eval_data, eval_every=1000) # TODO
+    # We run the expensive validation every other evaluation step
+    validator = ValidationCallback(tokenizer, 
+                                   raw_validation, 
+                                   eval_every=args.eval_every*2,
+                                   nsamples=10,
+                                   subset_size=40,
+                                   max_sequence_length=args.max_sequence_length,
+                                   output_dir=output_dir) 
+
     trainer = SFTTrainer(
         model=hf_model,
         processing_class=tokenizer,
         args=sft_config,
         train_dataset=dataset["train"],
-        eval_dataset=dataset["test"],
+        eval_dataset=dataset["validation"],
         data_collator=collator,
         callbacks=[validator],
     )
 
     results = trainer.evaluate()
-    step = max(1, trainer.state.global_step)
-    # for key, value in results.items():
-    #     wandb.log({f"eval/{key}": value}, step=step)
 
     print(f"Using batch size {trainer.args.per_device_train_batch_size} and gradient accumulation steps {trainer.args.gradient_accumulation_steps}")
 
@@ -116,17 +120,189 @@ def main():
 
 class ValidationCallback(TrainerCallback):
 
-    def __init__(self, tokenizer, eval_data, eval_every):
+    def __init__(self, tokenizer, validation_dataset, eval_every, nsamples, max_sequence_length=256, subset_size=20, output_dir=None):
         super().__init__()
         self.tokenizer = tokenizer
-        self.eval_data = eval_data
-        self.initial_samples = None
         self.eval_every = eval_every
-        self.initial_tvd = None
+        self.max_sequence_length = max_sequence_length
+        self.initial_samples = None
+        self.nsamples = nsamples
+        self.subset_size = subset_size
+        self.output_dir = Path(output_dir) if output_dir else None
+        self.best_cMFG = -float("inf")
+
+        # We use 1 generation per unique prompt, and then subsample subset_size prompts from that
+        self.val_data = validation_dataset.groupby("question", group_keys=False).apply(lambda x: x.sample(1, random_state=42))
+
+        # Now balance the validation data across confidence bins
+        # Not ideal, but we don't know greedy confidence bins
+        bins = self.val_data["confidence_bin"].unique()
+        n_bins = len(bins)
+        n_per_bin = max(1, self.subset_size // n_bins)
+        self.val_data = (
+            self.val_data.groupby("confidence_bin", group_keys=False)
+            .apply(lambda x: x.sample(min(len(x), n_per_bin), random_state=42))
+            .reset_index(drop=True)
+        )
 
         self.nli_tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
-        self.nli_model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli")
+        self.nli_model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cpu()
 
+        # self.triviaqa_val_data = TriviaQAEval()
+
+    def on_evaluate(self, args, state, control, **kwargs):
+        step = max(1, state.global_step)
+        print(f"Evaluating at step {step}...")
+
+        start_time = time.time()
+        hf_model = kwargs.get("model")
+        eval_dl = kwargs.get("eval_dataloader")
+
+        perplexity = self._compute_perplexity(hf_model, eval_dl)
+        wandb.log({"eval/perplexity": perplexity}, step=step)
+
+        # We don't run the expensive evaluations on every evaluation call
+        if step % self.eval_every == 0 or step == 1:
+            greedy, samples = self._generate(hf_model)
+
+            # We store the first batch of samples for TVD computation
+            if self.initial_samples is None:
+                self.initial_samples = samples
+
+            # Log the samples and greedy generations
+            prompts = self.val_data["question"].tolist()
+            greedy_table = wandb.Table(columns=["prompt", "greedy"])
+            sample_table = wandb.Table(columns=["prompt", "sample"])
+            for prompt, greedy_i in zip(prompts, greedy):
+                greedy_table.add_data(prompt, greedy_i)
+            for prompt, samples_i in zip(prompts, samples):
+                for sample in samples_i:
+                    sample_table.add_data(prompt, sample)
+            wandb.log({f"eval-greedy/{step}": greedy_table}, step=step)
+            wandb.log({f"eval-samples/{step}": sample_table}, step=step)
+
+            # Compute accuracy
+            references = self.val_data["references"]
+            correct = []
+            for greedy_gen, reference_list in zip(greedy, references):
+                for ref in reference_list:
+                    if ref.lower() in greedy_gen.lower():
+                        correct.append(1.)
+                        break
+                correct.append(0.)
+            accuracy = np.mean(correct)
+            wandb.log({"eval/QA-accuracy": accuracy}, step=step)
+
+            # GPU/CPU management
+            hf_model.cpu()
+            self.nli_model.cuda()
+
+            # Compute semantic TVD. Balanced across confidence bins somewhat based on the data selection procedure
+            TVDs = []
+            for prompt, samples_i, samples_j in zip(prompts, self.initial_samples, samples):
+                sem_tvd, _, _ = compute_semantic_TVD(prompt, samples_i, samples_j, self.nli_model, self.nli_tokenizer)
+                TVDs.append(sem_tvd)
+            wandb.log({"eval/semantic_TVD": np.mean(TVDs)}, step=step)
+
+            # Faithfulness evaluation
+            # prompts, greedy
+            cMFG = self._faithfulness(prompts, greedy, samples)
+            wandb.log({"eval/cMFG": cMFG}, step=step)
+
+            # Store best model based on faithfulness score
+            if cMFG > self.best_cMFG and self.output_dir:
+                self.best_cMFG = cMFG
+                best_dir = self.output_dir / "best-faithfulness"
+                best_dir.mkdir(parents=True, exist_ok=True)
+                hf_model.save_pretrained(best_dir)
+                self.tokenizer.save_pretrained(best_dir)
+                print(f"[BEST] saved to {best_dir}  (cMFG={cMFG:.4f})")
+
+            self.nli_model.cpu()
+            hf_model.cuda()
+            
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Evaluation took {elapsed_time:.2f} seconds")        
+
+    def _faithfulness(self, prompts, greedy, samples):
+        decisiveness_extractor = DecisivenessExtractorSimple()
+
+        confidence_list = []
+        decisiveness_list = []
+        faithfulness_list = []
+
+        for prompt, generation_to_evaluate, sample_list in zip(prompts, greedy, samples):
+        
+            # Confidence
+            entailment = []
+            for sample in sample_list:
+                entails = nli_bidirectional_entailment(self.nli_model, self.nli_tokenizer,
+                                    prompt, generation_to_evaluate, sample, lenient=True)
+                entailment.append(entails)
+                
+            confidence = np.mean(entailment)
+            confidence_list.append(confidence)
+
+            # Decisiveness
+            decisiveness = decisiveness_extractor(prompt, generation_to_evaluate)[0][1]
+            decisiveness_list.append(decisiveness)
+
+            # Faithfulness
+            faithfulness_list.append(1.0 - np.abs(confidence - decisiveness))
+            
+        print("[FAITHFULNESS EVALUATION]")
+        print(f"Confidence: {confidence_list}")
+        print(f"Decisiveness: {decisiveness_list}")
+        print(f"Faithfulness: {faithfulness_list}")
+
+        # cMFG computation
+        confidence_bins = [i/10 for i in range(1, 11)]
+        bin_ids = []
+        
+        # Bin the data
+        for confidence in confidence_list:
+            bin_idx = 0
+            for i, bin_val in enumerate(confidence_bins):
+                if confidence <= bin_val:
+                    bin_idx = i
+                    break
+            bin_ids.append(bin_idx)
+
+        # MFG per bin
+        MFG_per_bin = [0.0 for _ in range(len(confidence_bins))]
+        for i in range(len(confidence_bins)):
+            bin_faithfulnesses = [faithfulness_list[j] for j in range(len(faithfulness_list)) if bin_ids[j] == i]
+            MFG_per_bin[i] = sum(bin_faithfulnesses)/len(bin_faithfulnesses) if len(bin_faithfulnesses) > 0 else 0.5
+
+        # Assumes uniform distribution of confidence scores
+        cMFG = sum(MFG_per_bin)/len(MFG_per_bin)
+
+        return cMFG
+
+    def _generate(self, hf_model):
+        
+        # For generation, we need left padding
+        tokenizer = self.tokenizer
+        padding_side = tokenizer.padding_side
+        tokenizer.padding_side = "left"
+
+        model = Olmo2(model=hf_model, tokenizer=self.tokenizer) # TODO we assume OLMO-2 now, have to see how to generalize this
+
+        gen_cfg = GenerationConfig(max_length=self.max_sequence_length, 
+                                   remove_prompt=True, device=hf_model.device)
+        
+        prompts = self.val_data["question"].tolist()
+        greedy = model.greedy_decode(prompts, cfg=gen_cfg)
+        samples = []
+        for prompt in prompts:
+            samples.append(model.sample([prompt], n=self.nsamples, cfg=gen_cfg))
+
+        # Restore the model tokenizer
+        tokenizer.padding_side = padding_side
+
+        return greedy, samples
+    
     def _compute_perplexity(self, hf_model, dataloader):    
         with torch.no_grad():
             total_loss = 0.0
@@ -149,202 +325,18 @@ class ValidationCallback(TrainerCallback):
             perplexity = torch.exp(torch.tensor(avg_loss))
         return perplexity
 
-    def _compute_faithfulness(self, hf_model):
-        
-        # For generation, we need left padding
-        tokenizer = self.tokenizer
-        padding_side = tokenizer.padding_side
-        tokenizer.padding_side = "left"
-
-        model = Olmo2(model=hf_model, tokenizer=self.tokenizer) # TODO hardcoded OLMO-2 now
-        prompts = [self.eval_data[i*10]["question"] for i in range(98)] # TODO was 20
-        references = [self.eval_data[i*10]["references"] for i in range(98)] # TODO was 20
-
-        np.random.seed(42)
-        prompts_subset = np.random.choice(prompts, size=20, replace=False)
-
-        gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=hf_model.device)
-        greedy = model.greedy_decode(prompts, cfg=gen_cfg)
-
-        samples = model.sample(prompts_subset, n=10, cfg=gen_cfg)
-        samples = [samples[i*10:i*10+10] for i in range(0, len(prompts_subset))]
-
-        tokenizer.padding_side = padding_side
-
-        correct = []
-        for greedy_gen, reference_list in zip(greedy, references):
-            for ref in reference_list:
-                if ref.lower() in greedy_gen.lower():
-                    correct.append(1.)
-                    break
-            correct.append(0.)
-        accuracy = np.mean(correct)
-
-        return 0., prompts, greedy, prompts_subset, samples, accuracy
-
-    def on_evaluate(self, args, state, control, **kwargs):
-        step = max(1, state.global_step)
-        # print(f"Evaluating at step {step}...")
-
-        start_time = time.time()
-        hf_model = kwargs.get("model")
-        eval_dl = kwargs.get("eval_dataloader")
-        perplexity = self._compute_perplexity(hf_model, eval_dl)
-
-        wandb.log({"eval/perplexity": perplexity}, step=step)
-
-        if step % self.eval_every == 0 or step == 1:
-            # print("Running expensive evaluation...")
-            faithfulness, prompts, greedy, prompts_subset, samples, acc = self._compute_faithfulness(hf_model)
-            # wandb.log({"eval/faithfulness": faithfulness}, step=step)
-            greedy_table = wandb.Table(columns=["prompt", "greedy"])
-            sample_table = wandb.Table(columns=["prompt", "sample"])
-            for prompt, greedy_i in zip(prompts, greedy):
-                greedy_table.add_data(prompt, greedy_i)
-
-            for prompt, samples_i in zip(prompts_subset, samples):
-                for sample in samples_i:
-                    sample_table.add_data(prompt, sample)
-            wandb.log({f"eval-greedy/{step}": greedy_table}, step=step)
-            wandb.log({f"eval-samples/{step}": sample_table}, step=step)
-            wandb.log({"eval/QA-accuracy": acc}, step=step)
-
-            if self.initial_samples is None:
-                self.initial_samples = samples
-                faithfulness, prompts, greedy, prompts_subset, samples, acc = self._compute_faithfulness(hf_model)
-            hf_model.cpu()
-            self.nli_model.cuda()
-            tvds = []
-            for prompt, samples_i, samples_j in zip(prompts_subset, self.initial_samples, samples):
-                sem_tvd, _, _ = compute_semantic_TVD(prompt, samples_i, samples_j, self.nli_model, self.nli_tokenizer)
-                tvds.append(sem_tvd)
-
-            if self.initial_tvd is None:
-                self.initial_tvd = np.array(tvds)
-
-            wandb.log({"eval/semantic_TVD": np.mean(tvds)}, step=step)
-            wandb.log({"eval/semantic_TVD_diff": np.mean(np.array(tvds) - self.initial_tvd)}, step=step)
-            self.nli_model.cpu()
-            hf_model.cuda()
-            
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        # print(f"Evaluation took {elapsed_time:.2f} seconds")
-
-def grouped_train_test_split(dataframe, n_val_questions):
-
-    # Get unique questions
-    unique_questions = dataframe["question"].unique()
-    
-    # Perform train-test split on the unique questions
-    train_questions, test_questions = train_test_split(
-        unique_questions, test_size=n_val_questions, random_state=42
-    )
-
-    # Filter the dataframe based on the split
-    train_df = dataframe[dataframe["question"].isin(train_questions)]
-    test_df = dataframe[dataframe["question"].isin(test_questions)]
-    
-    return train_df, test_df
-
-def load_unprocessed_samples(prompt, step_size=500, validation_split=0.02, retain_structure=False):
-    project_root = Path(__file__).resolve().parent.parent / ".."
-    train_data_dir = project_root / "outputs" / "train_data" / "samples-sft"
-    # filename_template = f"{str(train_data_dir)}/olmo2-13b-popqa_training-generate_train-<lower>-<upper>.parquet"
-    start_idx = 0
-    stop_idx = step_size
-
-    dataframe = pd.DataFrame()
-    for filename in train_data_dir.glob("*.parquet"):
-
-        # filename = Path(filename_template.replace("<lower>", str(start_idx)).replace("<upper>", str(stop_idx)))
-        # if not filename.exists():
-        #     break
-
-        chunk = pd.read_parquet(filename)
-        print(f"Loaded {len(chunk)} training examples from {filename}")
-        dataframe = pd.concat([dataframe, chunk], ignore_index=True)
-        start_idx = stop_idx
-        stop_idx += step_size
-
-    # Flatten the samples
-    dataframe = dataframe.explode("samples", ignore_index=True)
-    dataframe = dataframe.rename(columns={"samples": "sample"})
-    
-    # Apply the prompt, strip some whitespace away
-    dataframe["question"] = dataframe["question"].apply(lambda x: prompt(x))
-    dataframe["sample"] = dataframe["sample"].apply(lambda x: x.strip())
-
-    # Drop irrelevant columns
-    if not retain_structure:
-        dataframe = dataframe.drop(columns=["references", "ref", "greedy", "sample_refs"])
-
-    validation_size = validation_split # needs to be a an integer
-    train_df, test_df = grouped_train_test_split(dataframe, validation_size)
-
-    # Convert into a HuggingFace Dataset
-    train_dataset = Dataset.from_pandas(train_df)
-    test_dataset = Dataset.from_pandas(test_df)
-
-    if retain_structure:
-        return DatasetDict({"train": train_dataset, "test": test_dataset})
-
-    def format_messages(example):
-        return {
-            "messages": [
-                {"role": "user", "content": example["question"]},
-                {"role": "assistant", "content": example["sample"]}
-            ]
-        }
-    train_dataset = train_dataset.map(format_messages, remove_columns=train_dataset.column_names)
-    test_dataset = test_dataset.map(format_messages, remove_columns=test_dataset.column_names)
-
-    dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
-
-    return dataset
-
-def load_training_data(model_name, prompt, step_size=-1, stratify=False, 
-                       validation_split=100, filename=None, postfix=False,
-                       retain_structure=False):
+def load_training_data(prompt, filename=None, stratify=False, 
+                       validation_split=100, postfix=False):
     project_root = Path(__file__).resolve().parent.parent / ".."
     train_data_dir = project_root / "outputs" / "train_data"
     target_column = "answer_unc_hedged_postfix" if postfix else "answer_unc_hedged_interweave"
 
-    if step_size > 0:
-        filename_template = f"{str(train_data_dir)}/{model_name}-popqa_training-generate_train.training_data-{model_name}-<lower>-<upper>.json"
-        start_idx = 0
-        stop_idx = step_size
-
-        dataframe = pd.DataFrame()
-        while True:
-            filename = Path(filename_template.replace("<lower>", str(start_idx)).replace("<upper>", str(stop_idx)))
-            if not filename.exists():
-                break
-
-            # Load the training data chunk
-            if filename.suffix == ".json":
-                with open(filename, 'r') as f:
-                    chunk = json.load(f)["data"]
-                chunk = pd.DataFrame(data)
-            elif filename.suffix == ".parquet":
-                chunk = pd.read_parquet(filename)
-            else:
-                raise ValueError(f"Unsupported file format: {filename.suffix}")
-        
-            print(f"Loaded {len(chunk)} training examples from {filename}")
-
-            dataframe = pd.concat([dataframe, chunk], ignore_index=True)
-
-            start_idx = stop_idx
-            stop_idx += step_size
-    else:
-        if filename is None:
-            # filename = Path(train_data_dir / f"{model_name}-popqa_training_all_generated_data_NEW.json")
-            filename = Path(train_data_dir / "training-data-01-05.json")
-        with open(filename, 'r') as f:
-            data = json.load(f) #["data"]
-        print(f"Loaded {len(data)} training examples from {filename}")
-        dataframe = pd.DataFrame(data)
+    if filename is None:
+        filename = train_data_dir / "training-data-10-07.json"
+    with open(filename, 'r') as f:
+        data = json.load(f)
+    print(f"Loaded {len(data)} training examples from {filename}")
+    dataframe = pd.DataFrame(data)
 
     if len(dataframe) == 0:
         raise ValueError(f"No training data found at {filename}.")
@@ -352,21 +344,15 @@ def load_training_data(model_name, prompt, step_size=-1, stratify=False,
     # Add a confidence bin column for statistics, confidence values in 10 bins: [0, 0.1], (0.1, 0.2], ..., (0.9, 1.0]
     bins = [0.1 * i for i in range(11)]
     dataframe["confidence_bin"] = pd.cut(dataframe["confidence"], bins=bins, labels=False, include_lowest=True)
-    if not retain_structure:
-        print("Confidence bin distribution:")
-        print(dataframe["confidence_bin"].value_counts(normalize=True).sort_index())
+    print("Confidence bin distribution:")
+    print(dataframe["confidence_bin"].value_counts(normalize=True).sort_index())
  
     # Apply the prompt, strip some whitespace away
     dataframe["question"] = dataframe["question"].apply(lambda x: prompt(x))
     dataframe[target_column] = dataframe[target_column].apply(lambda x: x.strip())
 
     # validation_size = int(len(dataframe) * validation_split) if isinstance(validation_split, float) else validation_split
-    train_df, test_df = grouped_train_test_split(dataframe, validation_split)
-
-    if retain_structure:
-        train_dataset = Dataset.from_pandas(train_df)
-        test_dataset = Dataset.from_pandas(test_df)
-        return DatasetDict({"train": train_dataset, "test": test_dataset})
+    train_df, val_df_raw = grouped_train_test_split(dataframe, validation_split)
 
     # If stratify==True, stratify according to the confidence bins
     if stratify:
@@ -384,11 +370,11 @@ def load_training_data(model_name, prompt, step_size=-1, stratify=False,
 
     # Drop irrelevant columns
     train_df = train_df.drop(columns=["confidence", "uncertainty_hedger", "answer", "confidence_bin"])
-    test_df = test_df.drop(columns=["confidence", "uncertainty_hedger", "answer", "confidence_bin"])
+    val_df = val_df_raw.drop(columns=["confidence", "uncertainty_hedger", "answer", "confidence_bin"])
 
     # Convert into a HuggingFace Dataset
     train_dataset = Dataset.from_pandas(train_df)
-    test_dataset = Dataset.from_pandas(test_df)
+    val_dataset = Dataset.from_pandas(val_df)
 
     def format_messages(example):
         return {
@@ -398,33 +384,27 @@ def load_training_data(model_name, prompt, step_size=-1, stratify=False,
             ]
         }
     train_dataset = train_dataset.map(format_messages, remove_columns=train_dataset.column_names)
-    test_dataset = test_dataset.map(format_messages, remove_columns=test_dataset.column_names)
-    dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
+    val_dataset = val_dataset.map(format_messages, remove_columns=val_dataset.column_names)
+    dataset = DatasetDict({"train": train_dataset, "validation": val_dataset})
 
     print(f"Training set size: {len(dataset['train'])}")
-    print(f"Validation set size: {len(dataset['test'])}")
+    print(f"Validation set size: {len(dataset['validation'])}")
     print(f"Example training datapoint: {dataset['train'][0]}")
 
-    return dataset
+    return dataset, val_df_raw
 
-    # # Convert into a HuggingFace Dataset
-    # dataset = Dataset.from_pandas(dataframe)
+def grouped_train_test_split(dataframe, n_val_questions):
 
-    # def format_messages(example):
-    #     return {
-    #         "messages": [
-    #             {"role": "user", "content": example["question"]},
-    #             {"role": "assistant", "content": example[target_column]}
-    #         ]
-    #     }
-    # dataset = dataset.map(format_messages, remove_columns=dataset.column_names)
+    # Get unique questions
+    unique_questions = dataframe["question"].unique()
+    
+    # Perform train-test split on the unique questions
+    train_questions, test_questions = train_test_split(
+        unique_questions, test_size=n_val_questions, random_state=42
+    )
 
-    # # Split the dataset into training and validation sets
-    # validation_size = int(len(dataset) * validation_split) if isinstance(validation_split, float) else validation_split
-    # dataset = dataset.train_test_split(test_size=validation_size, seed=42)
-
-    # print(f"Training set size: {len(dataset['train'])}")
-    # print(f"Validation set size: {len(dataset['test'])}")
-
-
-    # return dataset
+    # Filter the dataframe based on the split
+    train_df = dataframe[dataframe["question"].isin(train_questions)]
+    test_df = dataframe[dataframe["question"].isin(test_questions)]
+    
+    return train_df, test_df

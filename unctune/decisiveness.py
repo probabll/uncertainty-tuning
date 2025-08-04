@@ -54,6 +54,43 @@ Decisiveness score: 1.0."""
     def _construct_prompt(self, question: str, response: str) -> str:
         return f"{self.PROMPT}\n\nQuestion: {question}\nProposed answer: {response}\n"
 
+
+class DecisivenessExtractorSimple:
+
+    def _extract_decisiveness(self, sentence):
+        
+        # Map phrases to their confidence ranges
+        verbal_to_conf_range = {
+            'impossible': (0.0, 0.1),
+            'almost impossible': (0.1, 0.2),
+            'unlikely': (0.2, 0.3),
+            'somewhat doubtful': (0.3, 0.4),
+            'possible': (0.4, 0.55),
+            'likely': (0.55, 0.7),
+            'quite likely': (0.7, 0.8),
+            'very likely': (0.8, 0.9),
+            'certain': (0.9, 1.0),
+        }
+
+        # Sort phrases by length so we match smaller subsequences last
+        sorted_phrases = sorted(verbal_to_conf_range.keys(), key=len, reverse=True)
+
+        # Return the midpoint.
+        for verbal_unc in sorted_phrases:
+            if verbal_unc in sentence.lower():
+                low, high = verbal_to_conf_range[verbal_unc]
+                midpoint = (low + high) / 2
+                return midpoint
+
+        # No match found
+        print(f"No matching verbal uncertainty phrase found in sentence, returning 1.0 (100% certain): \"{sentence}\".")
+        return 1.0
+
+    def __call__(self, question: str, response: str, return_raw=False) -> List[Tuple[str, float]]:
+        decisiveness = self._extract_decisiveness(response)
+        return [(response, decisiveness)]
+
+
 if __name__ == "__main__":
     model = OpenAIModel("gpt-4o-mini")
     extractor = DecisivenessExtractorLLM(model)

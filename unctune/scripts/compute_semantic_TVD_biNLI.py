@@ -28,7 +28,7 @@ def get_tvd(probs1, probs2):
     tvd = sum(abs_differences)/2
     return tvd
 
-def nli_bidirectional_entailment(model, tokenizer, question, answer1, answer2):
+def nli_bidirectional_entailment(model, tokenizer, question, answer1, answer2, lenient=False):
     qa_1 = question + ' ' + answer1
     qa_2 = question + ' ' + answer2
 
@@ -45,8 +45,12 @@ def nli_bidirectional_entailment(model, tokenizer, question, answer1, answer2):
         reverse_predicted_label = torch.argmax(reverse_prediction, dim=1)
 
     is_equivalent = 0  #semantically not equivalent
-    if (2 in predicted_label) and (2 in reverse_predicted_label):
-        is_equivalent = 1 #semantically equivalent
+    if lenient:
+        if (2 in predicted_label) or (2 in reverse_predicted_label):
+            is_equivalent = 1 #semantically equivalent
+    else:
+        if (2 in predicted_label) and (2 in reverse_predicted_label):
+            is_equivalent = 1 #semantically equivalent
     
     return is_equivalent
 

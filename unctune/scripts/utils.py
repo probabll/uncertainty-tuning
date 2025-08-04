@@ -1,6 +1,6 @@
 from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Gemini, Olmo2, Qwen
 from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt
-from unctune.datasets import PopQA, NQ, PopQATrain
+from unctune.datasets import PopQA, NQ, PopQATrain, TriviaQAEval, PopQAValidation
 
 def load_prompt(name):
     name = name.lower()
@@ -48,8 +48,12 @@ def load_dataset(name):
     name = name.lower()
     if name == "popqa":
         return PopQA()
+    elif name == "popqa-validation":
+        return PopQAValidation()
     elif name == "nq":
         return NQ()  
+    elif name == "triviaqa":
+        return TriviaQAEval()
     else:
         raise ValueError(f"Unknown dataset: {name}")
 
