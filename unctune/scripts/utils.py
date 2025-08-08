@@ -26,11 +26,13 @@ def load_model(name, quantization_config = None):
     if name == "olmo-7b":
         return Olmo(model_name="allenai/OLMo-7B-Instruct")
     elif name == "olmo2-7b-sft":
-        return Olmo2(model_name="allenai/OLMo-2-1124-7B-SFT")
+        return Olmo2(model_name="allenai/OLMo-2-1124-7B-SFT", quantization_config=quantization_config)
     elif name == "olmo2-13b":
         return Olmo2(model_name="allenai/OLMo-2-1124-13B-Instruct")
     elif name == "olmo2-13b-sft":
         return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT", quantization_config=quantization_config)
+    elif name == "llama-8b-sft":
+        return Llama(model_name="allenai/Llama-3.1-Tulu-3-8B-SFT")
     if name == "ministral-8b":
         return Mistral(model_name="mistralai/Ministral-8B-Instruct-2410")
     elif name == "ministral-8b":

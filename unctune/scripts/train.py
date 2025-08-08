@@ -62,7 +62,6 @@ def main():
     model = load_model(args.model, quantization_config)
     tokenizer = model.tokenizer
     hf_model = model.model
-    validator = ValidationCallback(tokenizer, eval_data, eval_every=1000) # TODO
 
     # Logging and output directories
     if not args.output_dir:
@@ -116,7 +115,7 @@ def main():
                                    output_dir=output_dir) 
 
     # LoRA training
-    if args.lora or args.qlora:
+    if args.lora:
         peft_config = LoraConfig(
             r=16, # 8 is common, 16 gives more expressivity
             lora_alpha=32, #  2 * r
