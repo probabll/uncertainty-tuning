@@ -26,15 +26,24 @@ class OpenAIModel(BaseModel):
             retry_count = 0
             while retry_count < self.max_retries:
                 try:
-                    completion = self.client.chat.completions.create(
-                        model=self.model_name,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0. if not do_sample else 1.0,
-                        top_p=1.,
-                        n=n
-                    )
+                    if self.model_name == "gpt-5":
+                        # GPT-5 does not support temperature control / greedy decoding it seems
+                        completion = self.client.chat.completions.create(
+                            model=self.model_name,
+                            messages=[
+                                {"role": "user", "content": prompt}
+                            ],
+                            n=n)
+                    else:
+                        completion = self.client.chat.completions.create(
+                            model=self.model_name,
+                            messages=[
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0. if not do_sample else 1.0,
+                            top_p=1.,
+                            n=n
+                        )
 
                     if n > 1:
                         generations = [completion.choices[i].message.content for i in range(n)]
