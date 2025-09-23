@@ -1,6 +1,7 @@
 from unctune.models import GenerationConfig, OpenAIModel
 from unctune.decisiveness import DecisivenessExtractorLLM
 from unctune.nli import NliLLM
+from unctune.metrics import compute_lenient_em
 
 from unctune.scripts.utils import load_model, load_prompt, load_dataset
 
@@ -11,9 +12,12 @@ import argparse
 import torch
 import json
 import pandas as pd
+import evaluate
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--metric", type=str, default="faithfulness", 
+                        choices=["faithfulness", "accuracy"])
     parser.add_argument("--dataset", "-d", type=str, default="popqa")
     parser.add_argument("--model", "-m", type=str, default="olmo") 
     parser.add_argument("--prompt", "-p", type=str, default="vanilla")
@@ -23,13 +27,82 @@ def main():
     parser.add_argument("--override_files", action="store_true")
     args = parser.parse_args()
 
+    if args.metric == "faithfulness":
+        evaluate_faithfulness(args)
+    elif args.metric == "accuracy":
+        evaluate_accuracy(args)
+    else:
+        print(f"Unknown metric: {args.metric}. Please choose either 'faithfulness' or 'accuracy'.")
+    
+def evaluate_accuracy(args):
     dataset = load_dataset(args.dataset)
     prompt = load_prompt(args.prompt)
 
     project_root = Path(__file__).resolve().parent.parent / ".."
     output_dir = project_root / "outputs" / "eval_data"
     output_dir.mkdir(exist_ok=True)
-    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.json"
+    model_name = args.model 
+    if "local:" in model_name:
+        path = Path(model_name.split(":")[1])
+        model_name = path.name
+
+    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.json"
+    
+    ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
+    if not generations_file.exists() or args.override_files:
+        print("No generations found.")
+
+        model = load_model(args.model)
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(model, OpenAIModel) else None
+
+        generation_data = []
+        print(f"Generating on the {args.dataset} dataset...")
+        for idx, question, answers in tqdm(dataset):
+            model_input = prompt(question)
+            greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
+
+            generation_data.append({
+                "idx": idx,
+                "question": question,
+                "greedy": greedy_generation[0]
+            })
+
+        # Convert the data into a dataframe 
+        dataframe = pd.DataFrame(generation_data)
+        dataframe.attrs["dataset"] = args.dataset
+        dataframe.attrs["model"] = args.model
+        dataframe.attrs["prompt"] = args.prompt
+
+        # Store the data
+        dataframe.to_json(generations_file, orient="records", indent=4)
+        print(f"Data saved to {generations_file}.")
+
+        # Unload the generation model to avoid OOM errors
+        del model
+        torch.cuda.empty_cache()
+    else:
+        print(f"Found generations data at {generations_file}.")
+
+    dataframe = pd.read_json(generations_file)
+    reference_lists = [dataset[i][-1] for i in range(len(dataset))]
+    preds = [dataframe.iloc[i]["greedy"] for i in range(len(dataframe))]
+    em = compute_lenient_em(predictions=preds, reference_lists=reference_lists)
+    print(f"Lenient Exact Match score on {args.dataset}: {em:.2f}%")
+
+def evaluate_faithfulness(args):
+    dataset = load_dataset(args.dataset)
+    prompt = load_prompt(args.prompt)
+
+    project_root = Path(__file__).resolve().parent.parent / ".."
+    output_dir = project_root / "outputs" / "eval_data"
+    output_dir.mkdir(exist_ok=True)
+    model_name = args.model 
+    if "local:" in model_name:
+        path = Path(model_name.split(":")[1])
+        model_name = path.name
+
+    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
     if not generations_file.exists() or args.override_files:
@@ -75,7 +148,7 @@ def main():
         print(f"Found generations data at {generations_file}.")
     
     ### Extract the decisiveness scores
-    decisiveness_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.decisiveness-{args.decisiveness_model}.json"
+    decisiveness_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.decisiveness-{args.decisiveness_model}.json"
     if not decisiveness_file.exists() or args.override_files:
         print("No decisiveness data found.")
         dataframe = pd.read_json(generations_file)
@@ -127,9 +200,9 @@ def main():
     ### Compute confidence scores
     nli_model_name = args.nli_model if args.nli_model is not None else args.decisiveness_model
     if nli_model_name == args.decisiveness_model:
-        confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{nli_model_name}.json"
+        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.confidence-{nli_model_name}.json"
     else:
-        confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-decisiveness-{args.decisiveness_model}-confidence-{nli_model_name}.json"
+        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}-decisiveness-{args.decisiveness_model}-confidence-{nli_model_name}.json"
 
     if not confidence_file.exists() or args.override_files:
         print("No confidence data found.")

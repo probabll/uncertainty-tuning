@@ -9,27 +9,32 @@ class DecisivenessExtractorLLM:
 
 Here are some examples:
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I think JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: It's unlikely that JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Decisiveness score: 0.3.
+
+Question: in criminal minds, does JJ becomes a profiler
+Proposed answer: Yes, JJ becomes a profiler during the series.
+Extracted assertion: JJ becomes a profiler during the series.
+Decisiveness score: 1.0.
+
+Question: in criminal minds, is JJ a profiler for the entire series?
+Proposed answer: I am certain that JJ is not a profiler for the entire series. I am reasonably certain that JJ officially becomes a profiler in Criminal Minds season 6.
+Extracted assertion: JJ is not a profiler for the entire series.
+Decisiveness score: 1.0.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6.
 Decisiveness score: 0.8.
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: JJ officially becomes a profiler in Criminal Minds season 6, in either the first or second episode.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 1.
-Decisiveness score: 0.5.
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: I am somewhat doubtful that the episode in which JJ officially becomes a profiler in Criminal Minds is episode 2 in season 6.
 Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Decisiveness score: 0.5.
+Decisiveness score: 0.4.
 
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I’m not really sure about this, but I think the episode in which JJ officially becomes a profiler in Criminal Minds may be episode 2 in season 6.
-Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
-Decisiveness score: 0.6.
-
-Question: criminal minds episode where jj becomes a profiler
-Proposed answer: I don’t know which episode you’re referring to.
-Extracted assertion:
-Decisiveness score: 1.0."""
+Question: In criminal minds, does JJ becomes a forensic psychologist?
+Proposed answer: It's almost impossible that JJ becomes a forensic psychologist.
+Extracted assertion: JJ becomes a forensic psychologist
+Decisiveness score: 0.2."""
 
     def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
         self.model = model
@@ -53,6 +58,43 @@ Decisiveness score: 1.0."""
     
     def _construct_prompt(self, question: str, response: str) -> str:
         return f"{self.PROMPT}\n\nQuestion: {question}\nProposed answer: {response}\n"
+
+
+class DecisivenessExtractorSimple:
+
+    def _extract_decisiveness(self, sentence):
+        
+        # Map phrases to their confidence ranges
+        verbal_to_conf_range = {
+            'impossible': (0.0, 0.1),
+            'almost impossible': (0.1, 0.2),
+            'unlikely': (0.2, 0.3),
+            'somewhat doubtful': (0.3, 0.4),
+            'possible': (0.4, 0.55),
+            'likely': (0.55, 0.7),
+            'quite likely': (0.7, 0.8),
+            'very likely': (0.8, 0.9),
+            'certain': (0.9, 1.0),
+        }
+
+        # Sort phrases by length so we match smaller subsequences last
+        sorted_phrases = sorted(verbal_to_conf_range.keys(), key=len, reverse=True)
+
+        # Return the midpoint.
+        for verbal_unc in sorted_phrases:
+            if verbal_unc in sentence.lower():
+                low, high = verbal_to_conf_range[verbal_unc]
+                midpoint = (low + high) / 2
+                return midpoint
+
+        # No match found
+        print(f"No matching verbal uncertainty phrase found in sentence, returning 1.0 (100% certain): \"{sentence}\".")
+        return 1.0
+
+    def __call__(self, question: str, response: str, return_raw=False) -> List[Tuple[str, float]]:
+        decisiveness = self._extract_decisiveness(response)
+        return [(response, decisiveness)]
+
 
 if __name__ == "__main__":
     model = OpenAIModel("gpt-4o-mini")
