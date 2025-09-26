@@ -17,18 +17,17 @@ import os
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="popqa_training")
-    parser.add_argument("--model", type=str, default="olmo2-13b-sft") 
+    parser.add_argument("--model", type=str, default="llama-8b-sft") 
     parser.add_argument("--prompt", type=str, default="generate_train")
-    parser.add_argument("--nli_model", type=str, default="olmo2-13b") 
+    parser.add_argument("--nli_model", type=str, default="deberta-large") 
     parser.add_argument("--unc_verbal_model", type=str, default="mistral-12b") 
     parser.add_argument("--sample_batch_size", type=int, default=10)
     parser.add_argument("--num_sample_refs", type=int, default=10)
     parser.add_argument("--override_files", action="store_true")
-    parser.add_argument("--override_conf", action="store_true") #store_false (if NLI component, should be skipped)
-    parser.add_argument("--override_verbal", action="store_true") #store_false (if verbalising component, should be skipped)
-    parser.add_argument("--skip_sample_assertions", action="store_true")
-    parser.add_argument("--min_gen_index", type=int, default=0) 
-    parser.add_argument("--max_gen_index", type=int, default=100) 
+    parser.add_argument("--override_conf", action="store_true") #store_false (if NLI component should be skipped)
+    parser.add_argument("--override_verbal", action="store_true") #store_false (if verbalising component should be skipped)
+    parser.add_argument("--min_gen_index", type=int, default=4500) 
+    parser.add_argument("--max_gen_index", type=int, default=5654) 
     parser.add_argument("--cache_prompts", type=bool, default=True)
     args = parser.parse_args()
 
@@ -89,20 +88,21 @@ def main():
         print(f"Data saved to {generations_file}.")
 
     ### Compute confidence scores
-    skip_assertions = "-skip-sample-assertions" if args.skip_sample_assertions else ""
-    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}{skip_assertions}-{args.min_gen_index}-{args.max_gen_index}.json"
+    confidence_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.confidence-{args.nli_model}-{args.min_gen_index}-{args.max_gen_index}.json"
     if args.override_conf:
         print('Not running confidence')
     else:
         if not confidence_file.exists() or args.override_files:
             generations = pd.read_parquet(generations_file, engine="pyarrow")
             
-            judge_model = load_model(args.nli_model) 
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
+            if args.nli_model == "deberta-large":
+                nli = NLIModel("microsoft/deberta-large-mnli")
+            else:
+                judge_model = load_model(args.nli_model) 
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
+                nli = NliLLM(judge_model, gen_cfg)
 
-            # nli = NliLLM(judge_model, gen_cfg)
-            nli = NLIModel("microsoft/deberta-large-mnli")
 
             print(f"Computing confidence scores using {args.nli_model}...")
             confidence_data = []
@@ -148,7 +148,7 @@ def main():
             print(f"Confidence / NLI data saved to {confidence_file}.")
 
     ### Verbalise confidence and interleave in response
-    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.training_data-{args.unc_verbal_model}{skip_assertions}-{args.min_gen_index}-{args.max_gen_index}.json"
+    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.training_data-{args.unc_verbal_model}-{args.min_gen_index}-{args.max_gen_index}.json"
     if args.override_verbal:
         print('Not running interleaving')
     else:
@@ -206,7 +206,7 @@ def get_confidence(nli, question, ref_response, samples, cache_prompt_bool = Tru
     
     confidence = 1.0 - (sum(contradictions)/len(samples))
 
-    return contradictions, confidence, #llm_outputs 
+    return contradictions, confidence, 
 
 if __name__ == "__main__":
     main()
