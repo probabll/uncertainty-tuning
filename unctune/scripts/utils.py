@@ -59,6 +59,7 @@ def load_dataset(name):
     if name == "popqa":
         return PopQA()
     elif name == "popqa-validation":
+        # TODO fix, give model name
         return PopQAValidation()
     elif name == "nq":
         return NQ()  

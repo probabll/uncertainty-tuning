@@ -4,43 +4,57 @@ from transformers import DynamicCache
 
 class NliLLM:
 
-    PROMPT = """I will give you a question and two candidate answers. Please determine whether the two answers are contradicting. If one of the Candidate Answers is a canned response (as in, avoids answering the question), then the verdict should be "no contradiction". Answers may contain epistemic markers to hedge their responses, e.g. "It's likely", "It's impossible", "It's somewhat doubtful", "It is certain", ignore these in your verdict: compare the assertions made stripped from their uncertainty hedgers. Pay extra attention to "It is impossible": this is an uncertainty hedger indicating low confidence in the output, ignore the hedger and base your NLI verdict only on the following statement.
+    PROMPT = """I will give you a question and two candidate answers. Please determine whether the two answers are contradicting. If one of the Candidate Answers is a canned response (as in, avoids answering the question), then the verdict should be "no contradiction". Answers may contain epistemic markers to hedge their responses, e.g. "It's likely", "It's impossible", "It's somewhat doubtful", "It is certain", ignore these in your verdict: compare the assertions made stripped from their uncertainty hedgers. Before making your verdict, strip the answers of uncertainty hedgers and produce Stripped Answer 1 and Stripped Answer 2. Pay extra attention to phrases such as "It is impossible": this is an uncertainty hedger indicating low confidence in the output, ignore the hedger and base your NLI verdict only on statement following it. When stripping answers of uncertainty hedgers, do not add negations. "It's highly improbably that A" should map to "A", *not* to "not A".
 
 Here are some examples:
 
 Question: Varicose veins occur when what happens to the veins under the skin?
 Candidate Answer 1: becomes enlarged.
 Candidate Answer 2: becomes irritated by something.
+Stripped Answer 1: becomes enlarged.
+Stripped Answer 2: becomes irritated by something.
 Verdict: contradiction
 
 Question: What is LeBron James’ profession?
 Candidate Answer 1: It's likely that he is a professional basketball player.
 Candidate Answer 2: It's very unlikely that he is a basketball player.
+Stripped Answer 1: He is a professional basketball player.
+Stripped Answer 2: He is a basketball player.
 Verdict: no contradiction
 
 Question: Where was Barack Obama born?
-Candidate Answer 1: Honolulu Candidate
-Answer 2: Hawaii
+Candidate Answer 1: Honolulu
+Candidate Answer 2: Hawaii
+Stripped Answer 1: Honolulu
+Stripped Answer 2: Hawaii
 Verdict: no contradiction
 
 Question: Who did Hillary Clinton marry?
 Candidate Answer 1: It's likely that she married Bill.
 Candidate Answer 2: It is certainly Bill Clinton.
+Stripped Answer 1: She married Bill.
+Stripped Answer 2: Bill Clinton.
 Verdict: no contradiction
 
 Question: What position does David Beckham typically play?
 Candidate Answer 1: It's impossible that he was a right winger.
 Candidate Answer 2: It's somewhat doubtful that he was a striker.
+Stripped Answer 1: He was a right winger.
+Stripped Answer 2: He was a striker.
 Verdict: contradiction
 
 Question: Who is the top scorer in Manchester United?
 Candidate Answer 1: David Beckham.
 Candidate Answer 2: Please use Google search for questions like this.
+Stripped Answer 1: David Beckham.
+Stripped Answer 2: Please use Google search for questions like this.
 Verdict: no contradiction
 
 Question: How many movies did Brad Pit star in?
 Candidate Answer 1: Likely over 80 movies.
 Candidate Answer 2: Probably 75
+Stripped Answer 1: Over 80 movies.
+Stripped Answer 2: 75
 Verdict: contradiction"""
 
     def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
@@ -75,7 +89,7 @@ Verdict: contradiction"""
         return "no contradiction" in llm_output
     
     def _construct_prompt(self, question: str, answer_1: str, answer_2: str) -> str:
-        return f"{self.PROMPT}\n\nQuestion: {question}\nCandidate Answer 1: {answer_1}\nCandidate Answer 2: {answer_2}\nVerdict: "
+        return f"{self.PROMPT}\n\nQuestion: {question}\nCandidate Answer 1: {answer_1}\nCandidate Answer 2: {answer_2}. Produce Stripped Answer 1, Stripped Answer 2 and Verdict."
 
 if __name__ == "__main__":
     gen_cfg = None
@@ -85,22 +99,42 @@ if __name__ == "__main__":
     question = "What is the capital of France?"
     answer_1 = "The capital of France is Paris."
     answer_2 = "It is somewhat doubtful that the capital of France is Paris."
+    contradiction = False
     print((question, answer_1, answer_2))
-    print(nli.does_not_contradict(question, answer_1, answer_2, return_raw=True))
+    verdict, raw = nli.does_not_contradict(question, answer_1, answer_2, return_raw=True) # NO CONTRADICTION
+    result =  "PASS" if  verdict == (not contradiction) else "FAIL"
+    print(raw)
+    print(f"[TEST STATUS] = {result}")
 
     answer_3 = "It is impossible that the capital of France is Paris."
+    contradiction = False
     print((question, answer_1, answer_3))
-    print(nli.does_not_contradict(question, answer_1, answer_3, return_raw=True))
+    verdict, raw = nli.does_not_contradict(question, answer_1, answer_3, return_raw=True) # NO CONTRADICTION
+    result =  "PASS" if  verdict == (not contradiction) else "FAIL"
+    print(raw)
+    print(f"[TEST STATUS] = {result}")
 
     answer_4 = "It is impossible that the capital of France is Copenhagen."
+    contradiction = True
     print((question, answer_1, answer_4))
-    print(nli.does_not_contradict(question, answer_1, answer_4, return_raw=True))
+    verdict, raw = nli.does_not_contradict(question, answer_1, answer_4, return_raw=True) # CONTRADICTION
+    result =  "PASS" if  verdict == (not contradiction) else "FAIL"
+    print(raw)
+    print(f"[TEST STATUS] = {result}")
 
     answer_5 = "It is likely that the capital of France is Copenhagen."
+    contradiction = False
     print((question, answer_4, answer_5))
-    print(nli.does_not_contradict(question, answer_4, answer_5, return_raw=True))
+    verdict, raw = nli.does_not_contradict(question, answer_4, answer_5, return_raw=True) # NO CONTRADICTION
+    result =  "PASS" if  verdict == (not contradiction) else "FAIL"
+    print(raw)
+    print(f"[TEST STATUS] = {result}")
 
     answer_6= "The capital of France is Copenhagen."
     answer_7 = "Copenhagen is the capital of France."
+    contradiction = False
     print((question, answer_6, answer_7))
-    print(nli.does_not_contradict(question, answer_6, answer_7, return_raw=True))
+    verdict, raw = nli.does_not_contradict(question, answer_6, answer_7, return_raw=True) # NO CONTRADICTION
+    result =  "PASS" if  verdict == (not contradiction) else "FAIL"
+    print(raw)
+    print(f"[TEST STATUS] = {result}")

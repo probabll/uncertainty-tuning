@@ -10,11 +10,12 @@ from unctune.datasets.base_dataset import BaseDataset
 
 class PopQAValidation(BaseDataset):
 
-    def __init__(self):
+    def __init__(self, model_name):
+        self.model_name = model_name
         super().__init__()
 
     def _load_data(self):
-        _, validation_data = load_training_data(GenerateTrainingDataPrompt(), stratify=True)        
+        _, validation_data = load_training_data(self.model_name, GenerateTrainingDataPrompt(), stratify=True)        
         return validation_data
     
     def __len__(self):
@@ -27,14 +28,19 @@ class PopQAValidation(BaseDataset):
         else:
             return int(self.data.iloc[idx].name), self.data.iloc[idx]["question"], self.data.iloc[idx]["references"]
         
-def load_training_data(prompt, filename=None, stratify=False, 
+def load_training_data(model_name, prompt, filename=None, stratify=False, 
                        validation_split=100, postfix=False):
     project_root = Path(__file__).resolve().parent.parent / ".."
     train_data_dir = project_root / "outputs" / "train_data"
     target_column = "answer_unc_hedged_postfix" if postfix else "answer_unc_hedged_interweave"
 
     if filename is None:
-        filename = train_data_dir / "training-data-10-07.json"
+        if model_name == "olmo2-13b-sft":
+            filename = train_data_dir / "training-data-10-07.json"
+        elif model_name == "olmo2-7b-sft":
+            filename = train_data_dir / "olmo2-7b-training.json"
+        else:
+            raise ValueError(f"No training data for {model_name}.")
     with open(filename, 'r') as f:
         data = json.load(f)
     print(f"Loaded {len(data)} training examples from {filename}")

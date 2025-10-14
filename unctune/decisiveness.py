@@ -36,11 +36,47 @@ Proposed answer: It's almost impossible that JJ becomes a forensic psychologist.
 Extracted assertion: JJ becomes a forensic psychologist
 Decisiveness score: 0.2."""
 
-    def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None):
+
+    PROMPT_ALT = """You will be given a question and a proposed answer. Your task is to extract any assertions made by the proposed answer; for each assertion, you should output a decisiveness score: a number in [0,1] representing how likely you think this assertion is to be true, judged solely based on the provided answer. You should pay special attention to the usage of any hedging modifiers in the original answer, used to convey uncertainty in the truthfulness of the assertion. If the proposed answer punts the question, the extracted assertion should be the empty string and the decisiveness score should be 1.0.
+
+Here are some examples:
+
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: It's doubtful that JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 3.
+Decisiveness score: 0.3.
+
+Question: in criminal minds, does JJ becomes a profiler
+Proposed answer: Yes, JJ becomes a profiler during the series.
+Extracted assertion: JJ becomes a profiler during the series.
+Decisiveness score: 1.0.
+
+Question: in criminal minds, is JJ a profiler for the entire series?
+Proposed answer: It's definite that JJ is not a profiler for the entire series. There is a good chance that JJ officially becomes a profiler in Criminal Minds season 6.
+Extracted assertion: JJ is not a profiler for the entire series.
+Decisiveness score: 1.0.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6.
+Decisiveness score: 0.8.
+
+Question: criminal minds episode where JJ becomes a profiler
+Proposed answer: It's uncertain that the episode in which JJ officially becomes a profiler in Criminal Minds is episode 2 in season 6.
+Extracted assertion: JJ officially becomes a profiler in Criminal Minds season 6, episode 2.
+Decisiveness score: 0.4.
+
+Question: In criminal minds, does JJ becomes a forensic psychologist?
+Proposed answer: It's improbable that JJ becomes a forensic psychologist.
+Extracted assertion: JJ becomes a forensic psychologist
+Decisiveness score: 0.2."""
+
+    def __init__(self, model: BaseModel, gen_cfg: Optional[GenerationConfig] = None, use_altmap=False):
         self.model = model
         self.gen_cfg = gen_cfg
         if self.gen_cfg is not None:
             self.gen_cfg.remove_prompt = True
+        if use_altmap:
+            self.used_prompt = self.PROMPT_ALT
+        else:
+            self.used_prompt = self.PROMPT
 
     def __call__(self, question: str, response: str, return_raw=False) -> List[Tuple[str, float]]:
         prompt = self._construct_prompt(question, response)
@@ -57,7 +93,7 @@ Decisiveness score: 0.2."""
             return []
     
     def _construct_prompt(self, question: str, response: str) -> str:
-        return f"{self.PROMPT}\n\nQuestion: {question}\nProposed answer: {response}\n"
+        return f"{self.used_prompt}\n\nQuestion: {question}\nProposed answer: {response}\n"
 
 
 class DecisivenessExtractorSimple:

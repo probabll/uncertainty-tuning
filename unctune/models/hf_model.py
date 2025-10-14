@@ -8,6 +8,7 @@ class HuggingFaceModel(BaseModel):
 
     def __init__(self, model_name, torch_dtype=torch.float16):
         super().__init__()
+        self.top_p = 1.
         self.torch_dtype = torch_dtype
         self.model, self.tokenizer = self._create_model_and_tokenizer(model_name)
 
@@ -56,7 +57,7 @@ class HuggingFaceModel(BaseModel):
                                       max_new_tokens=cfg.max_length, 
                                       num_return_sequences=nsamples, do_sample=do_sample,
                                       top_k=0 if do_sample else None,
-                                      top_p=1. if do_sample else None,
+                                      top_p=self.top_p if do_sample else None,
                                       temperature=1.,
                                       pad_token_id=self.tokenizer.pad_token_id)
         generations = self.tokenizer.batch_decode(outputs[:, prompt_length:], skip_special_tokens=True)

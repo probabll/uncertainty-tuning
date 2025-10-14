@@ -41,8 +41,20 @@ class VerbalUncLLM:
         if self.gen_cfg is not None:
             self.gen_cfg.remove_prompt = True
 
-    def verbalised_conf_answer(self, question: str, answer: str, confidence: str, cache_prompt_bool = False):
-        verbal_unc, post_fixing_template = self._extract_verbal_conf(confidence)
+    def verbalised_conf_answer(self, question: str, answer: str, confidence: str, cache_prompt_bool = False, alternative_mapping=False, stochastic=False):
+
+        if alternative_mapping:
+            if stochastic:
+                # Flip a coin
+                choice = random.choice([True, False])
+                if choice:
+                    verbal_unc, post_fixing_template = self._extract_verbal_conf(confidence)
+                else:
+                    verbal_unc, post_fixing_template = self._extract_verbal_conf_alternative(confidence)
+            else:
+                verbal_unc, post_fixing_template = self._extract_verbal_conf_alternative(confidence)
+        else:
+            verbal_unc, post_fixing_template = self._extract_verbal_conf(confidence)
         
         #Interweaving
         if cache_prompt_bool == True:
@@ -94,6 +106,38 @@ class VerbalUncLLM:
         elif (confidence > 0.9) and (confidence <= 1.0):
             verbal_unc = 'certain'
             post_fixing_template = 'It is certain.'
+        else:
+            raise KeyError('Confidence has a value outside of acceptable range')
+        return verbal_unc, post_fixing_template
+
+    def _extract_verbal_conf_alternative(self, confidence: int):
+        if (confidence >= 0) and (confidence <= 0.1):
+            verbal_unc = 'highly improbable'
+            post_fixing_template = 'It is highly improbable.'
+        elif (confidence > 0.1) and (confidence <= 0.2):
+            verbal_unc = 'improbable'
+            post_fixing_template = 'It is improbable.'
+        elif (confidence > 0.2) and (confidence <= 0.3):
+            verbal_unc = 'doubtful'
+            post_fixing_template = 'It is doubtful.'
+        elif (confidence > 0.3) and (confidence <= 0.4):
+            verbal_unc = 'uncertain'
+            post_fixing_template = 'It is uncertain.'
+        elif (confidence > 0.4) and (confidence <= 0.55):
+            verbal_unc = 'maybe'
+            post_fixing_template = 'It may be.'
+        elif (confidence > 0.55) and (confidence <= 0.7):
+            verbal_unc = 'reasonably possible'
+            post_fixing_template = 'It is reasonably possible.'
+        elif (confidence > 0.7) and (confidence <= 0.8):
+            verbal_unc = 'good chance'
+            post_fixing_template = 'There is a good chance.'
+        elif (confidence > 0.8) and (confidence <= 0.9):
+            verbal_unc = 'highly probable'
+            post_fixing_template = 'It is highly probable.'
+        elif (confidence > 0.9) and (confidence <= 1.0):
+            verbal_unc = 'definite'
+            post_fixing_template = 'It is definite.'
         else:
             raise KeyError('Confidence has a value outside of acceptable range')
         return verbal_unc, post_fixing_template

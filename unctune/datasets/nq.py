@@ -36,3 +36,4 @@ if __name__ == "__main__":
     nq = NQ()
     print(len(nq))
     print(nq[0])
+    print(nq[0:2])

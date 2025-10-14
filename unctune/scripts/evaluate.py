@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--nli_model", "-nli", type=str, default=None)
     parser.add_argument("--sample_batch_size", "-bs", type=int, default=10)
     parser.add_argument("--override_files", action="store_true")
+    parser.add_argument("--decoding_method", type=str, default="greedy", choices=["greedy", "sampling", "nucleus"])
+    parser.add_argument("--use_altmap", action="store_true")
     args = parser.parse_args()
 
     if args.metric == "faithfulness":
@@ -46,7 +48,8 @@ def evaluate_accuracy(args):
         path = Path(model_name.split(":")[1])
         model_name = path.name
 
-    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.json"
+    decoding_str = "" if args.decoding_method == "greedy" else f"-{args.decoding_method}"
+    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
     if not generations_file.exists() or args.override_files:
@@ -60,12 +63,27 @@ def evaluate_accuracy(args):
         print(f"Generating on the {args.dataset} dataset...")
         for idx, question, answers in tqdm(dataset):
             model_input = prompt(question)
-            greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
+
+            if args.decoding_method == "greedy":
+                greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
+            elif args.decoding_method == "sampling":
+                greedy_generation = model.sample([model_input], 1, cfg=gen_cfg)
+            elif args.decoding_method == "nucleus":
+                model.top_p = 0.7
+                greedy_generation = model.sample([model_input], 1, cfg=gen_cfg)
+                model.top_p = 1.0
+
+            samples = []
+            while len(samples) < 20:
+                n = min(args.sample_batch_size, 20-len(samples))
+                sampled_generations = model.sample([model_input], n, cfg=gen_cfg)
+                samples.extend(sampled_generations)
 
             generation_data.append({
                 "idx": idx,
                 "question": question,
-                "greedy": greedy_generation[0]
+                "greedy": greedy_generation[0],
+                "samples": samples
             })
 
         # Convert the data into a dataframe 
@@ -84,7 +102,7 @@ def evaluate_accuracy(args):
     else:
         print(f"Found generations data at {generations_file}.")
 
-    dataframe = pd.read_json(generations_file)
+    dataframe = pd.read_json(generations_file, dtype={"idx": str})
     reference_lists = [dataset[i][-1] for i in range(len(dataset))]
     preds = [dataframe.iloc[i]["greedy"] for i in range(len(dataframe))]
     em = compute_lenient_em(predictions=preds, reference_lists=reference_lists)
@@ -102,7 +120,8 @@ def evaluate_faithfulness(args):
         path = Path(model_name.split(":")[1])
         model_name = path.name
 
-    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.json"
+    decoding_str = "" if args.decoding_method == "greedy" else f"-{args.decoding_method}"
+    generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
     if not generations_file.exists() or args.override_files:
@@ -116,7 +135,15 @@ def evaluate_faithfulness(args):
         print(f"Generating on the {args.dataset} dataset...")
         for idx, question, answers in tqdm(dataset):
             model_input = prompt(question)
-            greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
+
+            if args.decoding_method == "greedy":
+                greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
+            elif args.decoding_method == "sampling":
+                greedy_generation = model.sample([model_input], 1, cfg=gen_cfg)
+            elif args.decoding_method == "nucleus":
+                model.top_p = 0.7
+                greedy_generation = model.sample([model_input], 1, cfg=gen_cfg)
+                model.top_p = 1.0
 
             samples = []
             while len(samples) < 20:
@@ -148,16 +175,17 @@ def evaluate_faithfulness(args):
         print(f"Found generations data at {generations_file}.")
     
     ### Extract the decisiveness scores
-    decisiveness_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.decisiveness-{args.decisiveness_model}.json"
+    
+    decisiveness_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.decisiveness-{args.decisiveness_model}.json"
     if not decisiveness_file.exists() or args.override_files:
         print("No decisiveness data found.")
-        dataframe = pd.read_json(generations_file)
+        dataframe = pd.read_json(generations_file, dtype={"idx": str})
 
         judge_model = load_model(args.decisiveness_model)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(judge_model, OpenAIModel) else None
         
-        extractor = DecisivenessExtractorLLM(judge_model, gen_cfg)
+        extractor = DecisivenessExtractorLLM(judge_model, gen_cfg, use_altmap=args.use_altmap)
 
         print(f"Extracting assertions and decisiveness scores using {args.decisiveness_model}...")
         decisiveness_data = []
@@ -200,13 +228,13 @@ def evaluate_faithfulness(args):
     ### Compute confidence scores
     nli_model_name = args.nli_model if args.nli_model is not None else args.decisiveness_model
     if nli_model_name == args.decisiveness_model:
-        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}.confidence-{nli_model_name}.json"
+        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.confidence-{nli_model_name}.json"
     else:
-        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}-decisiveness-{args.decisiveness_model}-confidence-{nli_model_name}.json"
+        confidence_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}-decisiveness-{args.decisiveness_model}-confidence-{nli_model_name}.json"
 
     if not confidence_file.exists() or args.override_files:
         print("No confidence data found.")
-        generations = pd.read_json(generations_file)
+        generations = pd.read_json(generations_file, dtype={"idx": str})
         assertions_by_idx = read_assertions(decisiveness_file)
         
         judge_model = load_model(nli_model_name)
@@ -258,7 +286,8 @@ def evaluate_faithfulness(args):
                     contradicts = 0.0 if dnc else 1.0
                     contradictions_i.append(contradicts)
                     llm_outputs_i.append(llm_output)
-            
+
+                print(llm_outputs_i)            
                 confidence_i = 1.0 - ((1.0/len(samples)) * sum(contradictions_i))
                 confidence_scores.append(confidence_i)
                 llm_outputs.append(llm_outputs_i)
@@ -351,7 +380,7 @@ def evaluate_faithfulness(args):
     print()
 
     # Assumes uniform distribution of confidence scores
-    cMFG = sum(MFG_per_bin)/len(MFG_per_bin)
+    cMFG = sum(MFG_per_bin)/len(MFG_per_bin) 
     
     print(f"Mean confidence: {sum(confidences)/len(confidences):.2f}")
     print(f"Mean decisiveness: {sum(decisivenesses)/len(decisivenesses):.2f}")

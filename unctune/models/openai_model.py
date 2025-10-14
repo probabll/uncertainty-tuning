@@ -15,6 +15,9 @@ class OpenAIModel(BaseModel):
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "<your OpenAI API key if not set as an env var>"))
         self.model_name = model_name
         self.max_retries = 6
+        self.total_reasoning_tokens = 0
+        self.total_output_tokens = 0
+        self.total_requests = 0
 
     def _generate(self, prompts, do_sample, n, cfg=None):
         if cfg is not None:
@@ -28,12 +31,20 @@ class OpenAIModel(BaseModel):
                 try:
                     if self.model_name == "gpt-5":
                         # GPT-5 does not support temperature control / greedy decoding it seems
-                        completion = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {"role": "user", "content": prompt}
-                            ],
-                            n=n)
+                        assert n == 1
+                        response = self.client.responses.create(
+                            model=self.model_name, 
+                            input=[{"role": "user", "content": prompt}],
+                            reasoning={"effort": "minimal"} # minimize thinking
+                        )
+
+                        # some logging for debugging
+                        self.total_output_tokens += response.usage.output_tokens
+                        self.total_reasoning_tokens += getattr(response.usage.output_tokens_details, "reasoning_tokens", 0)
+                        self.total_requests += 1
+                        # print(f"Total output tokens: {self.total_output_tokens:,} (of which reasoning: {self.total_reasoning_tokens:,}) in {self.total_requests:,} requests (avg. {self.total_output_tokens / self.total_requests:,.0f} tokens/request)")
+
+                        outputs.append(response.output_text)
                     else:
                         completion = self.client.chat.completions.create(
                             model=self.model_name,
@@ -45,11 +56,11 @@ class OpenAIModel(BaseModel):
                             n=n
                         )
 
-                    if n > 1:
-                        generations = [completion.choices[i].message.content for i in range(n)]
-                        outputs.append(generations)
-                    else:
-                        outputs.append(completion.choices[0].message.content)
+                        if n > 1:
+                            generations = [completion.choices[i].message.content for i in range(n)]
+                            outputs.append(generations)
+                        else:
+                            outputs.append(completion.choices[0].message.content)
 
                     # If successful, break out of the retry loop
                     break

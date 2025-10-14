@@ -37,6 +37,8 @@ def main():
     parser.add_argument("--learning_rate", "-lr", type=float, default=1e-5)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--optim", "-o", type=str, default="paged_adamw_8bit")
+    parser.add_argument("--use_altmap", action="store_true")
+    parser.add_argument("--stochastic", action="store_true")
     args = parser.parse_args()
     print(args)
 
@@ -45,9 +47,9 @@ def main():
 
     # Load the dataset
     prompt = load_prompt(args.prompt)
-    dataset, raw_validation = load_training_data(prompt, stratify=args.stratify, 
+    dataset, raw_validation = load_training_data(args.model, prompt, stratify=args.stratify, 
                                                  validation_split=args.validation_split,
-                                                 postfix=(args.data == "postfix"))        
+                                                 postfix=(args.data == "postfix"), use_altmap=args.use_altmap, stochastic=args.stochastic)        
 
     # Load the model and tokenizer
     quantization_config = None
@@ -106,13 +108,13 @@ def main():
     )
 
     # We run the expensive validation every other evaluation step
-    validator = ValidationCallback(tokenizer, 
-                                   raw_validation, 
-                                   eval_every=args.eval_every*2,
-                                   nsamples=10,
-                                   subset_size=40,
-                                   max_sequence_length=args.max_sequence_length,
-                                   output_dir=output_dir) 
+    # validator = ValidationCallback(tokenizer, 
+    #                                raw_validation, 
+    #                                eval_every=args.eval_every*2,
+    #                                nsamples=10,
+    #                                subset_size=40,
+    #                                max_sequence_length=args.max_sequence_length,
+    #                                output_dir=output_dir) 
 
     # LoRA training
     if args.lora:
@@ -132,8 +134,8 @@ def main():
         args=sft_config,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
-        data_collator=collator,
-        callbacks=[validator],
+        data_collator=collator
+        # callbacks=[validator],
     )
 
     results = trainer.evaluate()
@@ -173,8 +175,8 @@ class ValidationCallback(TrainerCallback):
             .reset_index(drop=True)
         )
 
-        self.nli_tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
-        self.nli_model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cpu()
+        # self.nli_tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
+        # self.nli_model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cpu()
 
         # self.triviaqa_val_data = TriviaQAEval()
 
@@ -190,64 +192,64 @@ class ValidationCallback(TrainerCallback):
         wandb.log({"eval/perplexity": perplexity}, step=step)
 
         # We don't run the expensive evaluations on every evaluation call
-        if step % self.eval_every == 0 or step == 1:
-            greedy, samples = self._generate(hf_model)
+        # if step % self.eval_every == 0 or step == 1:
+        #     greedy, samples = self._generate(hf_model)
 
-            # We store the first batch of samples for TVD computation
-            if self.initial_samples is None:
-                self.initial_samples = samples
+        #     # We store the first batch of samples for TVD computation
+        #     if self.initial_samples is None:
+        #         self.initial_samples = samples
 
-            # Log the samples and greedy generations
-            prompts = self.val_data["question"].tolist()
-            greedy_table = wandb.Table(columns=["prompt", "greedy"])
-            sample_table = wandb.Table(columns=["prompt", "sample"])
-            for prompt, greedy_i in zip(prompts, greedy):
-                greedy_table.add_data(prompt, greedy_i)
-            for prompt, samples_i in zip(prompts, samples):
-                for sample in samples_i:
-                    sample_table.add_data(prompt, sample)
-            wandb.log({f"eval-greedy/{step}": greedy_table}, step=step)
-            wandb.log({f"eval-samples/{step}": sample_table}, step=step)
+        #     # Log the samples and greedy generations
+        #     prompts = self.val_data["question"].tolist()
+        #     greedy_table = wandb.Table(columns=["prompt", "greedy"])
+        #     sample_table = wandb.Table(columns=["prompt", "sample"])
+        #     for prompt, greedy_i in zip(prompts, greedy):
+        #         greedy_table.add_data(prompt, greedy_i)
+        #     for prompt, samples_i in zip(prompts, samples):
+        #         for sample in samples_i:
+        #             sample_table.add_data(prompt, sample)
+        #     wandb.log({f"eval-greedy/{step}": greedy_table}, step=step)
+        #     wandb.log({f"eval-samples/{step}": sample_table}, step=step)
 
-            # Compute accuracy
-            references = self.val_data["references"]
-            correct = []
-            for greedy_gen, reference_list in zip(greedy, references):
-                for ref in reference_list:
-                    if ref.lower() in greedy_gen.lower():
-                        correct.append(1.)
-                        break
-                correct.append(0.)
-            accuracy = np.mean(correct)
-            wandb.log({"eval/QA-accuracy": accuracy}, step=step)
+        #     # Compute accuracy
+        #     references = self.val_data["references"]
+        #     correct = []
+        #     for greedy_gen, reference_list in zip(greedy, references):
+        #         for ref in reference_list:
+        #             if ref.lower() in greedy_gen.lower():
+        #                 correct.append(1.)
+        #                 break
+        #         correct.append(0.)
+        #     accuracy = np.mean(correct)
+        #     wandb.log({"eval/QA-accuracy": accuracy}, step=step)
 
-            # GPU/CPU management
-            hf_model.cpu()
-            self.nli_model.cuda()
+        #     # GPU/CPU management
+        #     hf_model.cpu()
+        #     self.nli_model.cuda()
 
-            # Compute semantic TVD. Balanced across confidence bins somewhat based on the data selection procedure
-            TVDs = []
-            for prompt, samples_i, samples_j in zip(prompts, self.initial_samples, samples):
-                sem_tvd, _, _ = compute_semantic_TVD(prompt, samples_i, samples_j, self.nli_model, self.nli_tokenizer)
-                TVDs.append(sem_tvd)
-            wandb.log({"eval/semantic_TVD": np.mean(TVDs)}, step=step)
+        #     # Compute semantic TVD. Balanced across confidence bins somewhat based on the data selection procedure
+        #     TVDs = []
+        #     for prompt, samples_i, samples_j in zip(prompts, self.initial_samples, samples):
+        #         sem_tvd, _, _ = compute_semantic_TVD(prompt, samples_i, samples_j, self.nli_model, self.nli_tokenizer)
+        #         TVDs.append(sem_tvd)
+        #     wandb.log({"eval/semantic_TVD": np.mean(TVDs)}, step=step)
 
-            # Faithfulness evaluation
-            # prompts, greedy
-            cMFG = self._faithfulness(prompts, greedy, samples)
-            wandb.log({"eval/cMFG": cMFG}, step=step)
+        #     # Faithfulness evaluation
+        #     # prompts, greedy
+        #     cMFG = self._faithfulness(prompts, greedy, samples)
+        #     wandb.log({"eval/cMFG": cMFG}, step=step)
 
-            # Store best model based on faithfulness score
-            if cMFG > self.best_cMFG and self.output_dir:
-                self.best_cMFG = cMFG
-                best_dir = self.output_dir / "best-faithfulness"
-                best_dir.mkdir(parents=True, exist_ok=True)
-                hf_model.save_pretrained(best_dir)
-                self.tokenizer.save_pretrained(best_dir)
-                print(f"[BEST] saved to {best_dir}  (cMFG={cMFG:.4f})")
+        #     # Store best model based on faithfulness score
+        #     if cMFG > self.best_cMFG and self.output_dir:
+        #         self.best_cMFG = cMFG
+        #         best_dir = self.output_dir / "best-faithfulness"
+        #         best_dir.mkdir(parents=True, exist_ok=True)
+        #         hf_model.save_pretrained(best_dir)
+        #         self.tokenizer.save_pretrained(best_dir)
+        #         print(f"[BEST] saved to {best_dir}  (cMFG={cMFG:.4f})")
 
-            self.nli_model.cpu()
-            hf_model.cuda()
+        #     self.nli_model.cpu()
+        #     hf_model.cuda()
             
         end_time = time.time()
         elapsed_time = end_time - start_time
@@ -353,16 +355,33 @@ class ValidationCallback(TrainerCallback):
             perplexity = torch.exp(torch.tensor(avg_loss))
         return perplexity
 
-def load_training_data(prompt, filename=None, stratify=False, 
-                       validation_split=100, postfix=False):
+def load_training_data(model_name, prompt, filename=None, stratify=False, 
+                       validation_split=100, postfix=False, use_altmap=False, stochastic=False):
     project_root = Path(__file__).resolve().parent.parent / ".."
     train_data_dir = project_root / "outputs" / "train_data"
     target_column = "answer_unc_hedged_postfix" if postfix else "answer_unc_hedged_interweave"
 
     if filename is None:
-        filename = train_data_dir / "training-data-10-07.json"
+        if model_name == "olmo2-13b-sft":
+            if not use_altmap:
+                filename = train_data_dir / "training-data-10-07.json"
+            else:
+                if stochastic:
+                    filename = train_data_dir / "olmo2-13b-sft-popqa_training-generate_train-stochmap.training_data-mistral-12b-0-5654.json"
+                else:
+                    filename = train_data_dir / "olmo2-13b-sft-popqa_training-generate_train-altmap.training_data-mistral-12b-0-5654.json"
+        elif model_name == "olmo2-7b-sft":
+            filename = train_data_dir / "olmo2-7b-training.json"
+        elif model_name == "llama-8b-sft":
+            filename = train_data_dir / "llama-8b-training.json"
+        else:
+            raise ValueError(f"No training data for {model_name}.")
     with open(filename, 'r') as f:
         data = json.load(f)
+
+    # TODO: hotfix
+    if use_altmap:
+        data = data["data"]
     print(f"Loaded {len(data)} training examples from {filename}")
     dataframe = pd.DataFrame(data)
 

@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--min_gen_index", type=int, default=4500) 
     parser.add_argument("--max_gen_index", type=int, default=5654) 
     parser.add_argument("--cache_prompts", type=bool, default=True)
+    parser.add_argument("--use_alternative_mapping", action="store_true")
+    parser.add_argument("--use_stochastic_mapping", action="store_true")
     args = parser.parse_args()
 
     random.seed(10)
@@ -40,7 +42,9 @@ def main():
     output_dir = project_root / "outputs" / "train_data"
     # output_dir.mkdir(exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}-{args.min_gen_index}-{args.max_gen_index}.parquet"
+    alternative_str = "-altmap" if args.use_alternative_mapping else ""
+    alternative_str = "-stochmap" if args.use_stochastic_mapping else alternative_str
+    generations_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}{alternative_str}-{args.min_gen_index}-{args.max_gen_index}.parquet"
     
     ### Generate the data necessary for training 
     # We need for each question, the greedy response, a reference response and some sampled responses (e.g. 3), 
@@ -147,8 +151,9 @@ def main():
                 json.dump(data, f, indent=2)
             print(f"Confidence / NLI data saved to {confidence_file}.")
 
+    # olmo2-13b-sft-popqa-generate_train-altmap.training_data-mistral-12b-0-5654.json
     ### Verbalise confidence and interleave in response
-    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}.training_data-{args.unc_verbal_model}-{args.min_gen_index}-{args.max_gen_index}.json"
+    training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}{alternative_str}.training_data-{args.unc_verbal_model}-{args.min_gen_index}-{args.max_gen_index}.json"
     if args.override_verbal:
         print('Not running interleaving')
     else:
@@ -173,7 +178,10 @@ def main():
                     data_point = {}
                     confidence = confidence_answers[ans]
                     if len(ans)>0:
-                        (verbal_unc, answer_unc_interweave, answer_unc_postfix) = verbunc.verbalised_conf_answer(question, ans, confidence, cache_prompt_bool = args.cache_prompts) 
+                        (verbal_unc, answer_unc_interweave, answer_unc_postfix) = verbunc.verbalised_conf_answer(question, ans, confidence, 
+                                                                                                                 cache_prompt_bool = args.cache_prompts, 
+                                                                                                                 alternative_mapping=args.use_alternative_mapping,
+                                                                                                                 stochastic=args.use_stochastic_mapping) 
                         data_point["question"] = question
                         data_point["answer"] = ans
                         data_point["confidence"] = confidence
