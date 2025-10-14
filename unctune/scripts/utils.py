@@ -47,8 +47,6 @@ def load_model(name, quantization_config = None):
         return Qwen(model_name="Qwen/Qwen2.5-3B-Instruct")
     elif name.startswith("gpt-"):
         return OpenAIModel(model_name=name)
-    elif name.startswith("gemini"):
-        return Gemini(model_name=name)
     elif name == "llama-8b":
         return Llama(model_name="meta-llama/Llama-3.1-8B-Instruct")
     else:

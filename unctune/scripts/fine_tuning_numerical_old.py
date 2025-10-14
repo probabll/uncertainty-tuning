@@ -58,11 +58,10 @@ class RegressionTrainData():
             ids = input_ids_prompts_responses[i].to(device="cuda")
             with torch.no_grad():
                 outputs = self.model(input_ids=ids.unsqueeze(0), pad_token_id=self.tokenizer.pad_token_id)
-            # time.sleep(0.5)
             len_prompt = torch.sum(torch.where(input_ids_prompts[i] == self.tokenizer.pad_token_id, 0, 1))
             len_prompt_response = torch.sum(torch.where(input_ids_prompts_responses[i] == self.tokenizer.pad_token_id, 0, 1))
             outputs["logits"] = outputs["logits"].to(device="cpu")
-            relevant_outputs = outputs.logits[0][len_prompt:len_prompt_response]#.to(device="cpu")
+            relevant_outputs = outputs.logits[0][len_prompt:len_prompt_response]
             features = torch.mean(relevant_outputs, 0)
             inputs.append(features)
 

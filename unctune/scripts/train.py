@@ -98,7 +98,7 @@ def main():
         output_dir=output_dir,
         report_to="wandb", 
         run_name=run_name,
-        label_names=["labels"]  # To avoid lora warning "No label_names provided for model class ".
+        label_names=["labels"]
     )
 
     collator = DataCollatorForCompletionOnlyLM(
@@ -107,22 +107,13 @@ def main():
         mlm=False
     )
 
-    # We run the expensive validation every other evaluation step
-    # validator = ValidationCallback(tokenizer, 
-    #                                raw_validation, 
-    #                                eval_every=args.eval_every*2,
-    #                                nsamples=10,
-    #                                subset_size=40,
-    #                                max_sequence_length=args.max_sequence_length,
-    #                                output_dir=output_dir) 
-
     # LoRA training
     if args.lora:
         peft_config = LoraConfig(
             r=16, # 8 is common, 16 gives more expressivity
             lora_alpha=32, #  2 * r
             lora_dropout=0.1,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"], # can add more modules here
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
             task_type="CAUSAL_LM",
         )
         hf_model = get_peft_model(hf_model, peft_config)
@@ -135,7 +126,6 @@ def main():
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
         data_collator=collator
-        # callbacks=[validator],
     )
 
     results = trainer.evaluate()
@@ -148,213 +138,6 @@ def main():
     trainer.model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-class ValidationCallback(TrainerCallback):
-
-    def __init__(self, tokenizer, validation_dataset, eval_every, nsamples, max_sequence_length=256, subset_size=20, output_dir=None):
-        super().__init__()
-        self.tokenizer = tokenizer
-        self.eval_every = eval_every
-        self.max_sequence_length = max_sequence_length
-        self.initial_samples = None
-        self.nsamples = nsamples
-        self.subset_size = subset_size
-        self.output_dir = Path(output_dir) if output_dir else None
-        self.best_cMFG = -float("inf")
-
-        # We use 1 generation per unique prompt, and then subsample subset_size prompts from that
-        self.val_data = validation_dataset.groupby("question", group_keys=False).apply(lambda x: x.sample(1, random_state=42))
-
-        # Now balance the validation data across confidence bins
-        # Not ideal, but we don't know greedy confidence bins
-        bins = self.val_data["confidence_bin"].unique()
-        n_bins = len(bins)
-        n_per_bin = max(1, self.subset_size // n_bins)
-        self.val_data = (
-            self.val_data.groupby("confidence_bin", group_keys=False)
-            .apply(lambda x: x.sample(min(len(x), n_per_bin), random_state=42))
-            .reset_index(drop=True)
-        )
-
-        # self.nli_tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
-        # self.nli_model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cpu()
-
-        # self.triviaqa_val_data = TriviaQAEval()
-
-    def on_evaluate(self, args, state, control, **kwargs):
-        step = max(1, state.global_step)
-        print(f"Evaluating at step {step}...")
-
-        start_time = time.time()
-        hf_model = kwargs.get("model")
-        eval_dl = kwargs.get("eval_dataloader")
-
-        perplexity = self._compute_perplexity(hf_model, eval_dl)
-        wandb.log({"eval/perplexity": perplexity}, step=step)
-
-        # We don't run the expensive evaluations on every evaluation call
-        # if step % self.eval_every == 0 or step == 1:
-        #     greedy, samples = self._generate(hf_model)
-
-        #     # We store the first batch of samples for TVD computation
-        #     if self.initial_samples is None:
-        #         self.initial_samples = samples
-
-        #     # Log the samples and greedy generations
-        #     prompts = self.val_data["question"].tolist()
-        #     greedy_table = wandb.Table(columns=["prompt", "greedy"])
-        #     sample_table = wandb.Table(columns=["prompt", "sample"])
-        #     for prompt, greedy_i in zip(prompts, greedy):
-        #         greedy_table.add_data(prompt, greedy_i)
-        #     for prompt, samples_i in zip(prompts, samples):
-        #         for sample in samples_i:
-        #             sample_table.add_data(prompt, sample)
-        #     wandb.log({f"eval-greedy/{step}": greedy_table}, step=step)
-        #     wandb.log({f"eval-samples/{step}": sample_table}, step=step)
-
-        #     # Compute accuracy
-        #     references = self.val_data["references"]
-        #     correct = []
-        #     for greedy_gen, reference_list in zip(greedy, references):
-        #         for ref in reference_list:
-        #             if ref.lower() in greedy_gen.lower():
-        #                 correct.append(1.)
-        #                 break
-        #         correct.append(0.)
-        #     accuracy = np.mean(correct)
-        #     wandb.log({"eval/QA-accuracy": accuracy}, step=step)
-
-        #     # GPU/CPU management
-        #     hf_model.cpu()
-        #     self.nli_model.cuda()
-
-        #     # Compute semantic TVD. Balanced across confidence bins somewhat based on the data selection procedure
-        #     TVDs = []
-        #     for prompt, samples_i, samples_j in zip(prompts, self.initial_samples, samples):
-        #         sem_tvd, _, _ = compute_semantic_TVD(prompt, samples_i, samples_j, self.nli_model, self.nli_tokenizer)
-        #         TVDs.append(sem_tvd)
-        #     wandb.log({"eval/semantic_TVD": np.mean(TVDs)}, step=step)
-
-        #     # Faithfulness evaluation
-        #     # prompts, greedy
-        #     cMFG = self._faithfulness(prompts, greedy, samples)
-        #     wandb.log({"eval/cMFG": cMFG}, step=step)
-
-        #     # Store best model based on faithfulness score
-        #     if cMFG > self.best_cMFG and self.output_dir:
-        #         self.best_cMFG = cMFG
-        #         best_dir = self.output_dir / "best-faithfulness"
-        #         best_dir.mkdir(parents=True, exist_ok=True)
-        #         hf_model.save_pretrained(best_dir)
-        #         self.tokenizer.save_pretrained(best_dir)
-        #         print(f"[BEST] saved to {best_dir}  (cMFG={cMFG:.4f})")
-
-        #     self.nli_model.cpu()
-        #     hf_model.cuda()
-            
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"Evaluation took {elapsed_time:.2f} seconds")        
-
-    def _faithfulness(self, prompts, greedy, samples):
-        decisiveness_extractor = DecisivenessExtractorSimple()
-
-        confidence_list = []
-        decisiveness_list = []
-        faithfulness_list = []
-
-        for prompt, generation_to_evaluate, sample_list in zip(prompts, greedy, samples):
-        
-            # Confidence
-            entailment = []
-            for sample in sample_list:
-                entails = nli_bidirectional_entailment(self.nli_model, self.nli_tokenizer,
-                                    prompt, generation_to_evaluate, sample, lenient=True)
-                entailment.append(entails)
-                
-            confidence = np.mean(entailment)
-            confidence_list.append(confidence)
-
-            # Decisiveness
-            decisiveness = decisiveness_extractor(prompt, generation_to_evaluate)[0][1]
-            decisiveness_list.append(decisiveness)
-
-            # Faithfulness
-            faithfulness_list.append(1.0 - np.abs(confidence - decisiveness))
-            
-        print("[FAITHFULNESS EVALUATION]")
-        print(f"Confidence: {confidence_list}")
-        print(f"Decisiveness: {decisiveness_list}")
-        print(f"Faithfulness: {faithfulness_list}")
-
-        # cMFG computation
-        confidence_bins = [i/10 for i in range(1, 11)]
-        bin_ids = []
-        
-        # Bin the data
-        for confidence in confidence_list:
-            bin_idx = 0
-            for i, bin_val in enumerate(confidence_bins):
-                if confidence <= bin_val:
-                    bin_idx = i
-                    break
-            bin_ids.append(bin_idx)
-
-        # MFG per bin
-        MFG_per_bin = [0.0 for _ in range(len(confidence_bins))]
-        for i in range(len(confidence_bins)):
-            bin_faithfulnesses = [faithfulness_list[j] for j in range(len(faithfulness_list)) if bin_ids[j] == i]
-            MFG_per_bin[i] = sum(bin_faithfulnesses)/len(bin_faithfulnesses) if len(bin_faithfulnesses) > 0 else 0.5
-
-        # Assumes uniform distribution of confidence scores
-        cMFG = sum(MFG_per_bin)/len(MFG_per_bin)
-
-        return cMFG
-
-    def _generate(self, hf_model):
-        
-        # For generation, we need left padding
-        tokenizer = self.tokenizer
-        padding_side = tokenizer.padding_side
-        tokenizer.padding_side = "left"
-
-        model = Olmo2(model=hf_model, tokenizer=self.tokenizer) # TODO we assume OLMO-2 now, have to see how to generalize this
-
-        gen_cfg = GenerationConfig(max_length=self.max_sequence_length, 
-                                   remove_prompt=True, device=hf_model.device)
-        
-        prompts = self.val_data["question"].tolist()
-        greedy = model.greedy_decode(prompts, cfg=gen_cfg)
-        samples = []
-        for prompt in prompts:
-            samples.append(model.sample([prompt], n=self.nsamples, cfg=gen_cfg))
-
-        # Restore the model tokenizer
-        tokenizer.padding_side = padding_side
-
-        return greedy, samples
-    
-    def _compute_perplexity(self, hf_model, dataloader):    
-        with torch.no_grad():
-            total_loss = 0.0
-            total_tokens = 0    
-            for batch in dataloader:
-                
-                input_ids = batch["input_ids"].to(hf_model.device)
-                attention_mask = batch["attention_mask"].to(hf_model.device)
-                labels = batch["labels"].to(hf_model.device)
-
-                # Forward pass
-                outputs = hf_model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                loss = outputs.loss
-
-                # Accumulate loss and token count
-                npredictions = labels[labels != -100].shape[0] # Count non-input, non-padding tokens
-                total_loss += loss.item() * npredictions
-                total_tokens += npredictions 
-            avg_loss = total_loss / total_tokens
-            perplexity = torch.exp(torch.tensor(avg_loss))
-        return perplexity
-
 def load_training_data(model_name, prompt, filename=None, stratify=False, 
                        validation_split=100, postfix=False, use_altmap=False, stochastic=False):
     project_root = Path(__file__).resolve().parent.parent / ".."
@@ -362,20 +145,9 @@ def load_training_data(model_name, prompt, filename=None, stratify=False,
     target_column = "answer_unc_hedged_postfix" if postfix else "answer_unc_hedged_interweave"
 
     if filename is None:
-        if model_name == "olmo2-13b-sft":
-            if not use_altmap:
-                filename = train_data_dir / "training-data-10-07.json"
-            else:
-                if stochastic:
-                    filename = train_data_dir / "olmo2-13b-sft-popqa_training-generate_train-stochmap.training_data-mistral-12b-0-5654.json"
-                else:
-                    filename = train_data_dir / "olmo2-13b-sft-popqa_training-generate_train-altmap.training_data-mistral-12b-0-5654.json"
-        elif model_name == "olmo2-7b-sft":
-            filename = train_data_dir / "olmo2-7b-training.json"
-        elif model_name == "llama-8b-sft":
-            filename = train_data_dir / "llama-8b-training.json"
-        else:
-            raise ValueError(f"No training data for {model_name}.")
+        mapping_str = "-altmap" if use_altmap else ""
+        mapping_str = "-stochmap" if stochastic else mapping_str
+        filename = train_data_dir / f"{model_name}{mapping_str}-training.json"
     with open(filename, 'r') as f:
         data = json.load(f)
 

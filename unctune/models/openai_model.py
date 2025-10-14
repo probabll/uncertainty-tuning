@@ -42,7 +42,6 @@ class OpenAIModel(BaseModel):
                         self.total_output_tokens += response.usage.output_tokens
                         self.total_reasoning_tokens += getattr(response.usage.output_tokens_details, "reasoning_tokens", 0)
                         self.total_requests += 1
-                        # print(f"Total output tokens: {self.total_output_tokens:,} (of which reasoning: {self.total_reasoning_tokens:,}) in {self.total_requests:,} requests (avg. {self.total_output_tokens / self.total_requests:,.0f} tokens/request)")
 
                         outputs.append(response.output_text)
                     else:

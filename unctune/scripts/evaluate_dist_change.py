@@ -21,7 +21,6 @@ def main():
     parser.add_argument("--final_model", "-fm", type=str, default="olmo2-13b-sft-FT-pf") 
     parser.add_argument("--initial_prompt", "-ip", type=str, default="generate_train")
     parser.add_argument("--final_prompt", "-fp", type=str, default="generate_train")
-    # parser.add_argument("--final_prompt", "-pf", type=str, default="uncertainty")
     parser.add_argument("--se_model", "-se", type=str, default="olmo2-13b")
     parser.add_argument("--sample_batch_size", "-bs", type=int, default=10)
     parser.add_argument("--lower_ind", "-li", type=int, default=0)
@@ -122,49 +121,6 @@ def main():
     else:
         print(f"Found generations data at {generations_file_final_dist}.")
 
-    # generations_file_initial_dist_bootstrap = output_dir / f"{args.model}-{args.dataset}-{args.initial_prompt}-bootstrap.json"
-    # ### Generate the data necessary for evaluation (20 samples and a greedy decoding) for initial distribution
-    # if not generations_file_initial_dist_bootstrap.exists() or args.override_files:
-    #     print("No generations found.")
-
-    #     model = load_model(args.model)
-    #     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    #     gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(model, OpenAIModel) else None
-
-    #     dataset = load_dataset(args.dataset)
-    #     prompt = load_prompt(args.initial_prompt)
-
-    #     generation_data = []
-    #     print(f"Generating on the {args.dataset} dataset...")
-    #     for idx, question, answers in tqdm(dataset):
-    #         model_input = prompt(question)
-    #         greedy_generation = model.greedy_decode([model_input], cfg=gen_cfg)
-
-    #         samples = []
-    #         while len(samples) < 20:
-    #             n = min(args.sample_batch_size, 20-len(samples))
-    #             sampled_generations = model.sample([model_input], n, cfg=gen_cfg)
-    #             samples.extend(sampled_generations)
-
-    #         generation_data.append({
-    #             "idx": idx,
-    #             "question": question,
-    #             "greedy": greedy_generation[0],
-    #             "samples": samples
-    #         })
-
-    #     # Convert the data into a dataframe 
-    #     dataframe = pd.DataFrame(generation_data)
-    #     dataframe.attrs["dataset"] = args.dataset
-    #     dataframe.attrs["model"] = args.model
-    #     dataframe.attrs["prompt"] = args.initial_prompt
-
-    #     # Store the data
-    #     dataframe.to_json(generations_file_initial_dist_bootstrap, orient="records", indent=4)      
-    #     print(f"Data saved to {generations_file_initial_dist_bootstrap}.")
-    # else:
-    #     print(f"Found generations data at {generations_file_initial_dist_bootstrap}.")
-
     se_model_name = args.se_model 
 
     clusters_file = output_dir / f"{args.dataset}-{args.initial_model}-{args.initial_prompt}-compare-{args.final_model}-{args.final_prompt}.clustering-{args.se_model}_{args.lower_ind}-{args.upper_ind}.json"
@@ -172,11 +128,9 @@ def main():
         print("No clustering data found.")
         
         generations_initial = pd.read_json(generations_file_initial_dist)
-        # generations_initial_bootstrap = pd.read_json(generations_file_initial_dist_bootstrap)
         generations_final = pd.read_json(generations_file_final_dist)
 
         generations_merged = generations_initial.merge(generations_final,  how='inner', on='idx')
-        # generations_merged = generations_merged.merge(generations_initial_bootstrap,  how='inner', on='idx')
         generations_merged = generations_merged.drop(columns=['question_y'])
         generations_merged = generations_merged.rename(columns={"question_x":"question", "greedy_x": "greedy_initial", "samples_x": "samples_initial", "greedy_y": "greedy_final", "samples_y": "samples_final"})
 
@@ -195,21 +149,14 @@ def main():
             idx = row["idx"]
             samples_initial = row["samples_initial"]
             samples_final = row["samples_final"]
-            # samples_initial_bootstrap = row["samples_initial_bootstrap"]
 
             row_data = {
                 "idx": idx,
                 "samples_initial": samples_initial,
                 "samples_final": samples_final,
-                # "samples_initial_bootstrap": samples_initial_bootstrap
             }
 
-            # if args.bootstrap == "existing":
             joint_set_samples = list(set(samples_initial + samples_final)) #unique responses
-            # elif args.bootstrap == "different":
-            #     joint_set_samples = list(set(samples_initial + samples_final + samples_initial_bootstrap)) #unique responses
-            # else:
-            #     raise TypeError("Enter valid bootstrapping method, either 'different' or 'existing'.")
             clusters = {}
             sample_to_cluster = {}
 
@@ -287,25 +234,6 @@ def main():
             
             tvd_initial_vs_final = get_tvd(distribution_probs_initial, distribution_probs_final)
             row["tvd_initial_vs_final"] = tvd_initial_vs_final
-
-            # if args.bootstrap == "different":
-            #     #Samples obtained by sampling another set of responses from the initial distribution 
-            #     clusters_initial_bootstrap = [sample_to_cluster[sample] for sample in samples_initial_bootstrap]
-            #     distribution_probs_initial_bootstrap = get_dist_probs(distribution_support,clusters_initial_bootstrap)
-            #     row["distribution_probs_initial_bootstrap"] = distribution_probs_initial_bootstrap
-            #     tvd_initial_vs_initial_boot = get_tvd(distribution_probs_initial, distribution_probs_initial_bootstrap)
-            #     row["tvd_initial_vs_initial_boot"] = tvd_initial_vs_initial_boot
-            # elif args.bootstrap == "existing":
-                # #Sample with replacement from initial dist.
-                # distribution_probs_oracle1 = get_dist_probs(distribution_support,random.choices(clusters_initial, k=10))
-                # distribution_probs_oracle2 = get_dist_probs(distribution_support,random.choices(clusters_initial, k=10))
-                # row["distribution_probs_oracle1"] = distribution_probs_oracle1
-                # row["distribution_probs_oracle2"] = distribution_probs_oracle2
-
-                # tvd_initial_or1_vs_or2 = get_tvd(distribution_probs_oracle1, distribution_probs_oracle2)
-                # row["tvd_initial_or1_vs_or2"] = tvd_initial_or1_vs_or2
-            # else:
-            #     raise TypeError("Enter valid bootstrapping method, either 'different' or 'existing'.")
 
         with open(distribution_analysis_file, "w") as f:
             json.dump(clustering_data, f, indent=2)

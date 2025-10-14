@@ -151,7 +151,6 @@ def main():
                 json.dump(data, f, indent=2)
             print(f"Confidence / NLI data saved to {confidence_file}.")
 
-    # olmo2-13b-sft-popqa-generate_train-altmap.training_data-mistral-12b-0-5654.json
     ### Verbalise confidence and interleave in response
     training_data_file = output_dir / f"{args.model}-{args.dataset}-{args.prompt}{alternative_str}.training_data-{args.unc_verbal_model}-{args.min_gen_index}-{args.max_gen_index}.json"
     if args.override_verbal:
