@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--dataset", "-d", type=str, default="popqa")
     parser.add_argument("--model", "-m", type=str, default="olmo") 
     parser.add_argument("--prompt", "-p", type=str, default="vanilla")
+    parser.add_argument("--system_prompt", type=str, default=None)
     parser.add_argument("--decisiveness_model", "-dec", type=str)
     parser.add_argument("--nli_model", "-nli", type=str, default=None)
     parser.add_argument("--sample_batch_size", "-bs", type=int, default=10)
@@ -39,6 +40,7 @@ def main():
 def evaluate_accuracy(args):
     dataset = load_dataset(args.dataset)
     prompt = load_prompt(args.prompt)
+    system_prompt = load_prompt(args.system_prompt) if args.system_prompt else None
 
     project_root = Path(__file__).resolve().parent.parent / ".."
     output_dir = project_root / "outputs" / "eval_data"
@@ -49,6 +51,7 @@ def evaluate_accuracy(args):
         model_name = path.name
 
     decoding_str = "" if args.decoding_method == "greedy" else f"-{args.decoding_method}"
+    if args.system_prompt: decoding_str = decoding_str + f"-sys={args.system_prompt}"
     generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
@@ -56,6 +59,7 @@ def evaluate_accuracy(args):
         print("No generations found.")
 
         model = load_model(args.model)
+        model.set_system_prompt(system_prompt)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(model, OpenAIModel) else None
 
@@ -111,6 +115,7 @@ def evaluate_accuracy(args):
 def evaluate_faithfulness(args):
     dataset = load_dataset(args.dataset)
     prompt = load_prompt(args.prompt)
+    system_prompt = load_prompt(args.system_prompt) if args.system_prompt else None
 
     project_root = Path(__file__).resolve().parent.parent / ".."
     output_dir = project_root / "outputs" / "eval_data"
@@ -121,6 +126,7 @@ def evaluate_faithfulness(args):
         model_name = path.name
 
     decoding_str = "" if args.decoding_method == "greedy" else f"-{args.decoding_method}"
+    if args.system_prompt: decoding_str = decoding_str + f"-sys={args.system_prompt}"
     generations_file = output_dir / f"{model_name}-{args.dataset}-{args.prompt}{decoding_str}.json"
     
     ### Generate the data necessary for evaluation (20 samples and a greedy decoding)
@@ -128,6 +134,7 @@ def evaluate_faithfulness(args):
         print("No generations found.")
 
         model = load_model(args.model)
+        model.set_system_prompt(system_prompt)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         gen_cfg = GenerationConfig(max_length=250, remove_prompt=True, device=device) if not isinstance(model, OpenAIModel) else None
 

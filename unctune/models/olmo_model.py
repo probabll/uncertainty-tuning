@@ -19,13 +19,44 @@ class Olmo(HuggingFaceModel):
         tokenizer = OLMoTokenizerFast.from_pretrained(model_name, padding_side="left")
         return model, tokenizer
 
+    # def _apply_chat_template(self, prompts):
+    #     return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], 
+    #                                               tokenize=False, add_generation_prompt=True)
+    
     def _apply_chat_template(self, prompts):
-        return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], 
-                                                  tokenize=False, add_generation_prompt=True)
+
+        conversations = []
+        for p in prompts:
+            msgs = []
+            if getattr(self, "system_prompt", None):
+                msgs.append({"role": "system", "content": self.system_prompt()})
+            msgs.append({"role": "user", "content": p})
+            conversations.append(msgs)
+
+        return self.tokenizer.apply_chat_template(
+            conversations,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+    # def _apply_chat_template_caching(self, prompts):
+    #     return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], add_generation_prompt=True, return_tensors="pt")
     
     def _apply_chat_template_caching(self, prompts):
-        return self.tokenizer.apply_chat_template([[{"role": "user", "content": p}] for p in prompts], add_generation_prompt=True, return_tensors="pt")
-    
+        conversations = []
+        for p in prompts:
+            msgs = []
+            if getattr(self, "system_prompt", None):
+                msgs.append({"role": "system", "content": self.system_prompt()})
+            msgs.append({"role": "user", "content": p})
+            conversations.append(msgs)
+
+        return self.tokenizer.apply_chat_template(
+            conversations,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+
     def greedy_decode(self, prompts, cfg=None):
         prompts = self._apply_chat_template(prompts)
         return super().greedy_decode(prompts, cfg)
@@ -38,6 +69,9 @@ class Olmo(HuggingFaceModel):
         cache_prompts = self._apply_chat_template_caching(cache_prompts)
         full_prompts = self._apply_chat_template_caching(full_prompts)
         return super().generate_with_caching(cache_prompts, full_prompts, cfg)
+    
+    def set_system_prompt(self, system_prompt: str):
+        self.system_prompt = system_prompt
 
 if __name__ == "__main__":
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]

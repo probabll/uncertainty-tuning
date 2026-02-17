@@ -1,7 +1,7 @@
 from typing import Optional
 
-from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Gemini, Olmo2, Qwen, Llama
-from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt
+from unctune.models import Olmo, HuggingFaceModel, OpenAIModel, Mistral, Olmo2, Qwen, Llama
+from unctune.prompts import BasePrompt, VanillaPrompt, UncertaintyPrompt, GenerateTrainingDataPrompt, MetSensPlusHedgePrompt
 from unctune.datasets import PopQA, NQ, PopQATrain, TriviaQAEval, PopQAValidation
 
 def load_prompt(name):
@@ -13,7 +13,9 @@ def load_prompt(name):
     elif name == "uncertainty":
         return UncertaintyPrompt()
     elif name == "generate_train":
-        return GenerateTrainingDataPrompt()    
+        return GenerateTrainingDataPrompt()   
+    elif name == "metsens+hedge":
+        return MetSensPlusHedgePrompt()
     else:
         raise ValueError(f"Unknown prompt: {name}")
 

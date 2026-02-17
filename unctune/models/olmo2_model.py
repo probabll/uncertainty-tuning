@@ -30,7 +30,7 @@ class Olmo2(Olmo):
             tokenizer = self.tokenizer
 
         return model, tokenizer
-    
+        
 if __name__ == "__main__":
     prompts = ["Hi there!", "Who was the prime minister of The Netherlands in 2020?"]
     model = Olmo2()

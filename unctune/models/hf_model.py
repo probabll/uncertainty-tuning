@@ -85,7 +85,7 @@ class HuggingFaceModel(BaseModel):
         
         response = self.tokenizer.batch_decode(outputs[:, prompt_length:], skip_special_tokens=True)
         return response
-    
+
 if __name__ == "__main__":
     text = '<|im_start|>system\n<|im_end|>\n<|im_start|>user\Hi! <|im_end|>\n<|im_start|>assistant\n'
     model = HuggingFaceModel("utter-project/EuroLLM-1.7B-Instruct")

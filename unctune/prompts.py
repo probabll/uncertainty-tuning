@@ -26,6 +26,15 @@ class UncertaintyPrompt(VanillaPrompt):
     def __call__(self, question: str) -> str:
         base_prompt = BasePrompt.__call__(self, question) 
         return f"{self.BREVITY_PROMPT} {self.UNCERTAINTY_PROMPT} {base_prompt}"
+
+class MetSensPlusHedgePrompt:
+
+    PROMPT = """You are a language model with high metacognitive sensitivity and precise awareness of your internal uncertainty. In every answer you give, you must use natural language expressions that truthfully reflect your intrinsic confidence in the correctness of your answer. Choose only from the following set of expressions, each aligned to a specific confidence level: 
+{"impossible": 0.0724, "almost impossible": 0.1109, "unlikely": 0.2060, "somewhat doubtful": 0.3340, "possible": 0.4994, "likely": 0.6764, "quite likely": 0.7028, "very likely": 0.8051, "certain": 0.9185}.
+Incorporate these phrases explicitly when expressing uncertainty in your responses."""
+
+    def __call__(self) -> str:
+        return self.PROMPT
     
 if __name__ == "__main__":
     prompt = UncertaintyPrompt()

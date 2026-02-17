@@ -3,7 +3,7 @@ from typing import List
 from .gen_config import GenerationConfig
 
 class BaseModel(ABC):
-    
+        
     @abstractmethod
     def greedy_decode(self, prompts: List[str], cfg: GenerationConfig = None) -> List[str]:
         """Greedy decoding for the model."""
@@ -13,3 +13,6 @@ class BaseModel(ABC):
     def sample(self, prompts: List[str], n: int, cfg: GenerationConfig = None) -> List[str]:
         """Generate samples from the model."""
         pass
+
+    def set_system_prompt(self, prompt: str):
+        raise NotImplemented()
