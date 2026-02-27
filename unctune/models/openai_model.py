@@ -4,7 +4,7 @@ import time
 from unctune.models import BaseModel
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, APITimeoutError
     from openai import OpenAIError, RateLimitError
 except ImportError:
     pass
@@ -12,66 +12,59 @@ except ImportError:
 class OpenAIModel(BaseModel):
 
     def __init__(self, model_name="gpt-4o-mini"):
-        self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "<your OpenAI API key if not set as an env var>"))
+        self.client = OpenAI(
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            base_url=os.environ.get("LLM_GATEWAY_URL"),
+            timeout=120.0,
+        )
         self.model_name = model_name
         self.max_retries = 6
-        self.total_reasoning_tokens = 0
-        self.total_output_tokens = 0
         self.total_requests = 0
 
     def _generate(self, prompts, do_sample, n, cfg=None):
         if cfg is not None:
             raise NotImplementedError("GenerationConfig not supported for OpenAIModel")
-        
+
         outputs = []
         for prompt in prompts:
 
             retry_count = 0
             while retry_count < self.max_retries:
                 try:
-                    if self.model_name == "gpt-5":
-                        # GPT-5 does not support temperature control / greedy decoding it seems
-                        assert n == 1
-                        response = self.client.responses.create(
-                            model=self.model_name, 
-                            input=[{"role": "user", "content": prompt}],
-                            reasoning={"effort": "minimal"} # minimize thinking
-                        )
+                    is_gpt5 = self.model_name.startswith("gpt-5")
+                    kwargs = dict(
+                        model=self.model_name,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        n=n
+                    )
+                    if not is_gpt5:
+                        kwargs["temperature"] = 0. if not do_sample else 1.0
+                        kwargs["top_p"] = 1.
+                    completion = self.client.chat.completions.create(**kwargs)
 
-                        # some logging for debugging
-                        self.total_output_tokens += response.usage.output_tokens
-                        self.total_reasoning_tokens += getattr(response.usage.output_tokens_details, "reasoning_tokens", 0)
-                        self.total_requests += 1
-
-                        outputs.append(response.output_text)
+                    if n > 1:
+                        generations = [completion.choices[i].message.content for i in range(n)]
+                        outputs.append(generations)
                     else:
-                        completion = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0. if not do_sample else 1.0,
-                            top_p=1.,
-                            n=n
-                        )
+                        outputs.append(completion.choices[0].message.content)
 
-                        if n > 1:
-                            generations = [completion.choices[i].message.content for i in range(n)]
-                            outputs.append(generations)
-                        else:
-                            outputs.append(completion.choices[0].message.content)
+                    self.total_requests += 1
 
                     # If successful, break out of the retry loop
                     break
-                except RateLimitError as e:
+                except (RateLimitError, APITimeoutError) as e:
                     retry_count += 1
                     wait_time = 2. ** retry_count
-                    print(f"Rate limit hit, retrying in {wait_time:.2f} seconds...")
+                    print(f"{'Rate limit' if isinstance(e, RateLimitError) else 'Timeout'} hit, retrying in {wait_time:.2f} seconds...")
                     time.sleep(wait_time)
                 except OpenAIError as e:
-                    print(f"OpenAI API error: {e}")
-                    break
-            else: 
+                    retry_count += 1
+                    wait_time = 2. ** retry_count
+                    print(f"OpenAI API error: {e}. Retrying in {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+            else:
                 print(f"Failed to generate for prompt: {prompt}")
                 outputs.append(None)
 

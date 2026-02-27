@@ -19,20 +19,20 @@ def load_prompt(name):
     else:
         raise ValueError(f"Unknown prompt: {name}")
 
-def load_model(name, quantization_config = None):
+def load_model(name, quantization_config=None, device_map=None):
     name = name.lower()
     if name.startswith("local:"):
-        return HuggingFaceModel(model_name=name.split(":")[1])
+        return HuggingFaceModel(model_name=name.split(":")[1], device_map=device_map)
     elif name.startswith("olmo2-local:"):
-        return Olmo2(model_name=name.split(":")[1])
+        return Olmo2(model_name=name.split(":")[1], device_map=device_map)
     if name == "olmo-7b":
         return Olmo(model_name="allenai/OLMo-7B-Instruct")
     elif name == "olmo2-7b-sft":
-        return Olmo2(model_name="allenai/OLMo-2-1124-7B-SFT", quantization_config=quantization_config)
+        return Olmo2(model_name="allenai/OLMo-2-1124-7B-SFT", quantization_config=quantization_config, device_map=device_map)
     elif name == "olmo2-13b":
-        return Olmo2(model_name="allenai/OLMo-2-1124-13B-Instruct")
+        return Olmo2(model_name="allenai/OLMo-2-1124-13B-Instruct", device_map=device_map)
     elif name == "olmo2-13b-sft":
-        return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT", quantization_config=quantization_config)
+        return Olmo2(model_name="allenai/OLMo-2-1124-13B-SFT", quantization_config=quantization_config, device_map=device_map)
     elif name == "llama-8b-sft":
         return Llama(model_name="allenai/Llama-3.1-Tulu-3-8B-SFT")
     if name == "ministral-8b":
@@ -52,7 +52,7 @@ def load_model(name, quantization_config = None):
     elif name == "llama-8b":
         return Llama(model_name="meta-llama/Llama-3.1-8B-Instruct")
     else:
-        return HuggingFaceModel(model_name=name)
+        return HuggingFaceModel(model_name=name, device_map=device_map)
 
 def load_dataset(name):
     name = name.lower()

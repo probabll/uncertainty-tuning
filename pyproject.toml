@@ -24,9 +24,11 @@ dependencies = [
     "scikit-learn",
     "trl",
     "peft",
-    "bitsandbytes"
+    "bitsandbytes",
+    "evaluate"
 ]
 
 [project.scripts]
 unctune-evaluate = "unctune.scripts.evaluate:main"
 unctune-train = "unctune.scripts.train:main"
+unctune-perplexity = "unctune.scripts.perplexity:main"

@@ -7,10 +7,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class Olmo2(Olmo):
 
-    def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct", model=None, tokenizer=None, quantization_config=None):
+    def __init__(self, model_name="allenai/OLMo-2-1124-13B-Instruct", model=None, tokenizer=None, quantization_config=None, device_map=None):
         self.model = model
         self.tokenizer = tokenizer
         self.quantization_config = quantization_config
+        self.device_map = device_map
         super().__init__(model_name, torch_dtype=torch.bfloat16)
 
     def _create_model_and_tokenizer(self, model_name):
@@ -19,6 +20,8 @@ class Olmo2(Olmo):
             model_cfg["quantization_config"] = self.quantization_config
         else:
             model_cfg["torch_dtype"] = torch.bfloat16
+        if self.device_map is not None:
+            model_cfg["device_map"] = self.device_map
         if self.model is None:
             model = AutoModelForCausalLM.from_pretrained(model_name, **model_cfg)
         else:

@@ -6,14 +6,18 @@ import torch, copy
 
 class HuggingFaceModel(BaseModel):
 
-    def __init__(self, model_name, torch_dtype=torch.float16):
+    def __init__(self, model_name, torch_dtype=torch.float16, device_map=None):
         super().__init__()
         self.top_p = 1.
         self.torch_dtype = torch_dtype
+        self.device_map = device_map
         self.model, self.tokenizer = self._create_model_and_tokenizer(model_name)
 
     def _create_model_and_tokenizer(self, model_name):
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=self.torch_dtype)
+        kwargs = {"torch_dtype": self.torch_dtype}
+        if self.device_map is not None:
+            kwargs["device_map"] = self.device_map
+        model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         return model, tokenizer
 
@@ -87,7 +91,7 @@ class HuggingFaceModel(BaseModel):
         return response
 
 if __name__ == "__main__":
-    text = '<|im_start|>system\n<|im_end|>\n<|im_start|>user\Hi! <|im_end|>\n<|im_start|>assistant\n'
+    text = '<|im_start|>system\n<|im_end|>\n<|im_start|>user\\Hi! <|im_end|>\n<|im_start|>assistant\n'
     model = HuggingFaceModel("utter-project/EuroLLM-1.7B-Instruct")
     cfg = GenerationConfig(max_length=10)
     print(model.sample([text, text], n=2, cfg=cfg))

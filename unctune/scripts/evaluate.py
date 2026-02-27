@@ -7,12 +7,116 @@ from unctune.scripts.utils import load_model, load_prompt, load_dataset
 
 from pathlib import Path
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import argparse
 import torch
 import json
 import pandas as pd
 import evaluate
+
+def _extract_decisiveness_for_row(extractor, row):
+    question = row["question"]
+    greedy_response = row["greedy"]
+    decisiveness, raw_output = extractor(question, greedy_response, return_raw=True)
+    return {
+        "idx": row["idx"],
+        "greedy": {
+            "llm_judge_output": raw_output,
+            "decisiveness": decisiveness
+        }
+    }
+
+def _run_decisiveness(extractor, dataframe, num_workers):
+    decisiveness_data = []
+    if num_workers <= 1:
+        for x, row in tqdm(dataframe.iterrows(), total=len(dataframe)):
+            decisiveness_data.append(_extract_decisiveness_for_row(extractor, row))
+    else:
+        futures = {}
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            for x, row in dataframe.iterrows():
+                future = executor.submit(_extract_decisiveness_for_row, extractor, row)
+                futures[future] = x
+            with tqdm(total=len(futures)) as pbar:
+                for future in as_completed(futures):
+                    try:
+                        row_data = future.result()
+                        decisiveness_data.append((futures[future], row_data))
+                    except Exception as e:
+                        print(f"Warning: Row {futures[future]} failed: {e}")
+                    pbar.update(1)
+        decisiveness_data.sort(key=lambda t: t[0])
+        decisiveness_data = [row_data for _, row_data in decisiveness_data]
+    return decisiveness_data
+
+def _compute_confidence_for_row(nli, row, assertions_by_idx):
+    question = row["question"]
+    idx = row["idx"]
+    greedy_assertions = assertions_by_idx[idx]["assertions"]
+    samples = row["samples"]
+
+    llm_outputs = []
+    contradictions = []
+    cache = {}
+    confidence_scores = []
+
+    for greedy_assertion in greedy_assertions:
+        contradictions_i = []
+        llm_outputs_i = []
+        for sample_generation in samples:
+            if greedy_assertion == sample_generation:
+                dnc = True
+                llm_output = "<equivalent>"
+            elif sample_generation in cache:
+                dnc = cache[sample_generation]
+                llm_output = "<cache>"
+            else:
+                dnc, llm_output = nli.does_not_contradict(
+                    question, greedy_assertion, sample_generation, return_raw=True
+                )
+                cache[sample_generation] = dnc
+
+            contradicts = 0.0 if dnc else 1.0
+            contradictions_i.append(contradicts)
+            llm_outputs_i.append(llm_output)
+
+        confidence_i = 1.0 - ((1.0 / len(samples)) * sum(contradictions_i))
+        confidence_scores.append(confidence_i)
+        llm_outputs.append(llm_outputs_i)
+        contradictions.append(contradictions_i)
+
+    return {
+        "idx": idx,
+        "confidence": confidence_scores,
+        "contradictions": contradictions,
+        "llm_outputs": llm_outputs
+    }
+
+def _run_confidence(nli, generations, assertions_by_idx, num_workers):
+    confidence_data = []
+    if num_workers <= 1:
+        for x, row in tqdm(generations.iterrows(), total=len(generations)):
+            confidence_data.append(_compute_confidence_for_row(nli, row, assertions_by_idx))
+    else:
+        futures = {}
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            for x, row in generations.iterrows():
+                future = executor.submit(
+                    _compute_confidence_for_row, nli, row, assertions_by_idx
+                )
+                futures[future] = x
+            with tqdm(total=len(futures)) as pbar:
+                for future in as_completed(futures):
+                    try:
+                        row_data = future.result()
+                        confidence_data.append((futures[future], row_data))
+                    except Exception as e:
+                        print(f"Warning: Row {futures[future]} failed: {e}")
+                    pbar.update(1)
+        confidence_data.sort(key=lambda t: t[0])
+        confidence_data = [row_data for _, row_data in confidence_data]
+    return confidence_data
 
 def main():
     parser = argparse.ArgumentParser()
@@ -28,6 +132,8 @@ def main():
     parser.add_argument("--override_files", action="store_true")
     parser.add_argument("--decoding_method", type=str, default="greedy", choices=["greedy", "sampling", "nucleus"])
     parser.add_argument("--use_altmap", action="store_true")
+    parser.add_argument("--num_workers", "-w", type=int, default=8,
+                        help="Number of parallel workers for API calls (default: 8)")
     args = parser.parse_args()
 
     if args.metric == "faithfulness":
@@ -195,22 +301,7 @@ def evaluate_faithfulness(args):
         extractor = DecisivenessExtractorLLM(judge_model, gen_cfg, use_altmap=args.use_altmap)
 
         print(f"Extracting assertions and decisiveness scores using {args.decisiveness_model}...")
-        decisiveness_data = []
-        for x, row in tqdm(dataframe.iterrows(), total=len(dataframe)):
-            question = row["question"]
-            row_data = {
-                "idx": row["idx"]
-            }
-
-            # Extract assertions and decisiveness for the greedy response
-            greedy_response = row["greedy"]
-            decisiveness, raw_output = extractor(question, greedy_response, return_raw=True)
-            row_data["greedy"] = {
-                "llm_judge_output": raw_output,
-                "decisiveness": decisiveness
-            }
-
-            decisiveness_data.append(row_data)
+        decisiveness_data = _run_decisiveness(extractor, dataframe, args.num_workers)
 
         # Save to a JSON file
         data = {}
@@ -251,59 +342,7 @@ def evaluate_faithfulness(args):
         nli = NliLLM(judge_model, gen_cfg)
 
         print(f"Computing confidence scores using {nli_model_name}...")
-        confidence_data = []
-        for x, row in tqdm(generations.iterrows(), total=len(generations)):
-            question = row["question"]
-            idx = row["idx"]
-
-            row_data = {
-                "idx": idx
-            }
-
-            greedy_assertions = assertions_by_idx[idx]["assertions"]
-            decisiveness = assertions_by_idx[idx]["decisiveness"]
-            
-            samples = row["samples"]
-
-            llm_outputs = []
-            contradictions = []
-            cache = {}
-
-            confidence_scores = []
-
-            # For each greedy assertion, we compute a confidence score
-            for greedy_assertion in greedy_assertions:
-
-                contradictions_i = []
-                llm_outputs_i = []
-                for sample_generation in samples:
-
-                    # If the greedy assertion is the same as the, we can skip the NLI call.
-                    # Also, we keep a cache of the NLI outputs to avoid redundant calls.
-                    if greedy_assertion == sample_generation:
-                        dnc = True
-                        llm_output = "<equivalent>"
-                    elif sample_generation in cache:
-                        dnc = cache[sample_generation]
-                        llm_output = "<cache>"
-                    else:
-                        dnc, llm_output = nli.does_not_contradict(question, greedy_assertion, sample_generation, return_raw=True)
-                        cache[sample_generation] = dnc
-
-                    contradicts = 0.0 if dnc else 1.0
-                    contradictions_i.append(contradicts)
-                    llm_outputs_i.append(llm_output)
-
-                print(llm_outputs_i)            
-                confidence_i = 1.0 - ((1.0/len(samples)) * sum(contradictions_i))
-                confidence_scores.append(confidence_i)
-                llm_outputs.append(llm_outputs_i)
-                contradictions.append(contradictions_i)
-            
-            row_data["confidence"] = confidence_scores
-            row_data["contradictions"] = contradictions
-            row_data["llm_outputs"] = llm_outputs
-            confidence_data.append(row_data)
+        confidence_data = _run_confidence(nli, generations, assertions_by_idx, args.num_workers)
 
         # Save to a JSON file
         data = {}
@@ -332,9 +371,13 @@ def evaluate_faithfulness(args):
 
     confidence_bins = [i/10 for i in range(1, 11)]
     
+    skipped = 0
     for row in confidence_data:
         confidence = row["confidence"]
         idx = row["idx"]
+        if not confidence:
+            skipped += 1
+            continue
         decisiveness = assertions[idx]["decisiveness"]
         faithfulness = 1.0 - ((1.0 / len(confidence)) * sum([abs(c - d) for c, d in zip(confidence, decisiveness)]))
         
@@ -350,6 +393,9 @@ def evaluate_faithfulness(args):
         confidences.append(average_confidence)
         decisivenesses.append(sum(decisiveness) / len(decisiveness))
         faithfulnesses.append(faithfulness)
+
+    if skipped:
+        print(f"Skipped {skipped} rows with missing confidence data.")
 
     # Count the number of samples in each bin
     bin_counts = [bin_ids.count(i) for i in range(len(confidence_bins))]
