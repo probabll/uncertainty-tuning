@@ -25,6 +25,10 @@ def load_model(name, quantization_config = None):
         return HuggingFaceModel(model_name=name.split(":")[1])
     elif name.startswith("olmo2-local:"):
         return Olmo2(model_name=name.split(":")[1])
+    elif name.startswith("mistral-local:"):
+        return Mistral(model_name=name.split(":")[1])
+    elif name.startswith("llama-local:"):
+        return Llama(model_name=name.split(":")[1])
     if name == "olmo-7b":
         return Olmo(model_name="allenai/OLMo-7B-Instruct")
     elif name == "olmo2-7b-sft":
@@ -49,8 +53,8 @@ def load_model(name, quantization_config = None):
         return Qwen(model_name="Qwen/Qwen2.5-3B-Instruct")
     elif name.startswith("gpt-"):
         return OpenAIModel(model_name=name)
-    elif name == "llama-8b":
-        return Llama(model_name="meta-llama/Llama-3.1-8B-Instruct")
+    # elif name == "llama-8b":
+    #     return Llama(model_name="meta-llama/Llama-3.1-8B-Instruct")
     else:
         return HuggingFaceModel(model_name=name)
 

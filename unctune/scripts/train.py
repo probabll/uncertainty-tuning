@@ -101,9 +101,10 @@ def main():
         label_names=["labels"]
     )
 
+    response_template = "[/INST]" if args.model == "mistral-12b" else "<|assistant|>\n"
     collator = DataCollatorForCompletionOnlyLM(
         tokenizer=tokenizer,
-        response_template="<|assistant|>\n",
+        response_template=response_template,
         mlm=False
     )
 
